@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>F1: квалификации и гонки</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@600;800&family=Onest:wght@400;500;600&display=swap">
+<style>
+:root{--bg:#f0f1f4;--card:#fff;--ink:#15151e;--mute:#62626f;--line:#dcdde3;--red:#e10600;--on-red:#fff;--q:#1d6fe0;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12121a;--card:#1c1c28;--ink:#f2f2f7;--mute:#a0a0b0;--line:#2e2e3e;--red:#ff3b30;--q:#5ea1ff;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#12121a;--card:#1c1c28;--ink:#f2f2f7;--mute:#a0a0b0;--line:#2e2e3e;--red:#ff3b30;--q:#5ea1ff;color-scheme:dark}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 Onest,system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:560px;margin:0 auto;padding:16px 16px 40px}
+h1,h2,.big{font-family:"Exo 2",Onest,system-ui,sans-serif}
+h1{font-size:26px;font-weight:800;margin:6px 0 2px}
+h2{font-size:19px;font-weight:800;margin:0}
+.sub{color:var(--mute);margin:0 0 16px;font-size:14px}
+.next{display:grid;gap:10px;margin-bottom:8px}
+.cd{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px;border-left:6px solid var(--q)}
+.cd.race{border-left-color:var(--red)}
+.cd p{margin:0;color:var(--mute);font-size:14px}
+.big{font-size:34px;font-weight:800;line-height:1.15;font-variant-numeric:tabular-nums}
+.cd b{font-weight:600}
+.gp{background:var(--card);border:1px solid var(--line);border-radius:16px;margin-top:14px;overflow:hidden}
+.gh{padding:14px 16px;border-bottom:1px solid var(--line)}
+.gh p{margin:2px 0 0;color:var(--mute);font-size:14px}
+.s{display:grid;grid-template-columns:1fr auto;gap:0 12px;padding:10px 16px;border-left:6px solid transparent;border-bottom:1px solid var(--line)}
+.s:last-child{border-bottom:0}
+.s.q{border-left-color:var(--q);font-weight:600}
+.s.r{border-left-color:var(--red);font-weight:600}
+.s .tr{grid-column:1/3;color:var(--mute);font-size:13px;font-weight:400}
+.s.past{opacity:.45}
+.s.past .t{text-decoration:line-through}
+.t{text-align:right;font-variant-numeric:tabular-nums}
+.note{color:var(--mute);font-size:13px;margin-top:18px}
+main{padding-bottom:96px}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav button{flex:1;font:inherit;font-size:12px;font-weight:600;background:none;border:0;color:var(--mute);padding:13px 2px;cursor:pointer}
+nav button[aria-current="true"]{color:var(--ink);box-shadow:inset 0 3px 0 var(--red)}
+nav button:focus-visible{outline:3px solid var(--q);outline-offset:-3px}
+.pad{padding:12px 16px}
+.pad p{margin:4px 0}
+.pad .m{color:var(--mute);font-size:14px}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<nav><button data-t="sch">Расписание</button><button data-t="std">Зачёт</button><button data-t="live">Live</button><button data-t="trk">Трассы</button><button data-t="news">Новости</button></nav>
+<script>
+var GPS = [
+  {n: "Гран-при Лас-Вегаса", f: "🇺🇸", c: "Лас-Вегас, США", tz: "America/Los_Angeles", s: [["p", "Практика 1", "2026-11-20T00:30:00Z"], ["p", "Практика 2", "2026-11-20T04:00:00Z"], ["p", "Практика 3", "2026-11-21T00:30:00Z"], ["q", "Квалификация", "2026-11-21T04:00:00Z"], ["r", "Гонка", "2026-11-22T04:00:00Z"]]},
+  {n: "Гран-при Катара", f: "🇶🇦", c: "Лусаил, Катар", tz: "Asia/Qatar", s: [["p", "Практика 1", "2026-11-27T13:30:00Z"], ["p", "Практика 2", "2026-11-27T17:00:00Z"], ["p", "Практика 3", "2026-11-28T14:30:00Z"], ["q", "Квалификация", "2026-11-28T18:00:00Z"], ["r", "Гонка", "2026-11-29T16:00:00Z"]]},
+  {n: "Гран-при Абу-Даби", f: "🇦🇪", c: "Яс-Марина, ОАЭ · финал сезона", tz: "Asia/Dubai", s: [["p", "Практика 1", "2026-12-04T09:30:00Z"], ["p", "Практика 2", "2026-12-04T13:00:00Z"], ["p", "Практика 3", "2026-12-05T10:30:00Z"], ["q", "Квалификация", "2026-12-05T14:00:00Z"], ["r", "Гонка", "2026-12-06T13:00:00Z"]]}
+];
+var MYTZ = "";
+try { MYTZ = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) {}
+function fmt(t, tz) {
+  var o = {weekday: "short", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit"};
+  if (tz) o.timeZone = tz;
+  return new Date(t).toLocaleString("ru-RU", o);
+}
+function cd(ms) {
+  var s = Math.max(0, Math.floor(ms / 1000)), d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  function p(n) { return String(n).padStart(2, "0"); }
+  return (d ? d + " дн " : "") + p(h) + ":" + p(m) + ":" + p(x);
+}
+function nextOf(type, now) {
+  for (var i = 0; i < GPS.length; i++) for (var j = 0; j < GPS[i].s.length; j++) {
+    var e = GPS[i].s[j], t = Date.parse(e[2]);
+    if (e[0] === type && t > now) return {g: GPS[i], t: t};
+  }
+  return null;
+}
+function block(cls, label, n, now) {
+  if (!n) return "";
+  return "<div class='cd " + cls + "'><p>" + label + " · " + n.g.f + " " + n.g.n + "</p><div class='big'>" + cd(n.t - now) + "</div><p><b>" + fmt(n.t) + "</b></p></div>";
+}
+function viewSchedule() {
+  var now = Date.now(), nq = nextOf("q", now), nr = nextOf("r", now);
+  var h = "<h1>F1: когда гонки</h1><p class='sub'>Три последних уик-энда сезона 2026. Время показано по вашим часам" + (MYTZ ? " (" + MYTZ + ")" : "") + ".</p>";
+  if (!nq && !nr) h += "<div class='cd'><p>Сезон 2026 завершён. Ждите календарь на следующий год.</p></div>";
+  else h += "<div class='next'>" + block("", "До квалификации", nq, now) + block("race", "До гонки", nr, now) + "</div>";
+  GPS.forEach(function (g) {
+    h += "<section class='gp'><div class='gh'><h2>" + g.f + " " + g.n + "</h2><p>" + g.c + "</p></div>";
+    g.s.forEach(function (e) {
+      var t = Date.parse(e[2]);
+      h += "<div class='s " + e[0] + (t < now ? " past" : "") + "'><span>" + e[1] + "</span><span class='t'>" + fmt(t) + "</span><span class='tr'>на трассе: " + fmt(t, g.tz) + "</span></div>";
+    });
+    h += "</section>";
+  });
+  h += "<p class='note'>Время пересчитано из GMT. Расписание могут изменить, сверяйтесь с formula1.com.</p>";
+  return h;
+}
+var tab = "sch";
+var TRACKS = [
+  {n: "🇺🇸 Лас-Вегас", c: "Las Vegas Strip Circuit", m: "6,201 км · 50 кругов", d: "Городская трасса по улицам Лас-Вегаса. Гонка проходит в субботу вечером по местному времени, старт в 20:00."},
+  {n: "🇶🇦 Лусаил", c: "Lusail International Circuit", m: "5,419 км · 57 кругов", d: "Быстрая трасса в Катаре, гонка идёт под прожекторами. По нагрузке на пилотов её сравнивают с Сингапуром из-за жары."},
+  {n: "🇦🇪 Яс-Марина", c: "Yas Marina Circuit", m: "5,281 км · 58 кругов", d: "Трасса в Абу-Даби, где с 2009 года проходит финал сезона. Гонка стартует в сумерках."}
+];
+function card(t, m, d) { return "<section class='gp'><div class='gh'><h2>" + t + "</h2></div><div class='pad'>" + (m ? "<p class='m'>" + m + "</p>" : "") + "<p>" + d + "</p></div></section>"; }
+function viewStand() {
+  return "<h1>Зачёт</h1><p class='sub'>Данные после Гран-при Бразилии (8 ноября).</p>" +
+    card("Личный зачёт", "Кими Антонелли, Mercedes: 390 очков", "Антонелли стал чемпионом мира 2026 ещё в Мехико, самым молодым в истории Формулы 1. Второе место в борьбе между Максом Ферстаппеном и Льюисом Хэмилтоном после Бразилии пока за Ферстаппеном.") +
+    card("Кубок конструкторов", "Чемпион: Mercedes", "Команда оформила титул в Сан-Паулу: девятый в её истории и первый с 2021 года. Red Bull и McLaren спорят за третье место.") +
+    "<p class='note'>Полные таблицы с очками всех пилотов появятся, когда подключим источник данных.</p>";
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]; }); }
+var TIRE = {SOFT: "#e10600", MEDIUM: "#d9a400", HARD: "#8a8a99", INTERMEDIATE: "#1f9d55", WET: "#1d6fe0"};
+var TIRE_RU = {SOFT: "мягкие", MEDIUM: "средние", HARD: "жёсткие", INTERMEDIATE: "интер", WET: "дождевые"};
+function viewLive() {
+  return "<h1>Live</h1><p class='sub'>Позиции, отрывы и шины пилотов из OpenF1.</p><div id='lc'></div><div id='lv'><p class='note'>Загрузка…</p></div>";
+}
+function tickLive() {
+  var el = document.getElementById("lc");
+  if (!el) return;
+  var now = Date.now(), best = null;
+  GPS.forEach(function (g) { g.s.forEach(function (e) { var t = Date.parse(e[2]); if (t > now && (!best || t < best.t)) best = {g: g, e: e, t: t}; }); });
+  el.innerHTML = best ? "<div class='cd'><p>Ближайшая сессия · " + best.g.f + " " + best.g.n + "</p><div class='big'>" + cd(best.t - now) + "</div><p><b>" + best.e[1] + ", " + fmt(best.t) + "</b></p></div>" : "";
+}
+function loadLive() {
+  fetch("/api/live").then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); }).then(function (d) {
+    var el = document.getElementById("lv");
+    if (!el) return;
+    if (!d.session) { el.innerHTML = "<p class='note'>Данных о сессиях пока нет.</p>"; return; }
+    var h = "<p class='sub' style='margin-top:14px'>" + (d.session.live ? "Идёт сейчас: " : "Последняя сессия: ") + esc(d.session.name) + ", " + esc(d.session.country) + (d.stale ? " · данные могли устареть" : "") + "</p><section class='gp'>";
+    d.drivers.forEach(function (x) {
+      h += "<div class='s' style='border-left-color:" + esc(x.color) + "'><span><b>" + x.position + "</b> " + esc(x.code) + " <span style='color:var(--mute);font-size:13px;font-weight:400'>" + esc(x.team) + "</span></span><span class='t'>" + esc(x.gap) + " · <span style='color:" + (TIRE[x.tire] || "var(--mute)") + "'>" + (TIRE_RU[x.tire] || "—") + "</span></span></div>";
+    });
+    el.innerHTML = h + "</section>";
+  }).catch(function () {
+    var el = document.getElementById("lv");
+    if (el) el.innerHTML = "<p class='note'>Нет связи с сервером. Запустите его командой npm start.</p>";
+  });
+}
+function viewTracks() {
+  var h = "<h1>Трассы</h1><p class='sub'>Три последних этапа сезона.</p>";
+  TRACKS.forEach(function (t) { h += card(t.n + " · " + t.c, t.m, t.d); });
+  return h;
+}
+function viewNews() {
+  return "<h1>Новости</h1><p class='sub'>Главное за последние недели.</p>" +
+    card("Антонелли — чемпион мира", "Мехико, конец октября", "Кими Антонелли выиграл титул 2026 года и стал самым молодым чемпионом за всю историю Формулы 1.") +
+    card("Mercedes выиграл Кубок конструкторов", "Сан-Паулу, 8 ноября", "Рассел и Антонелли финишировали четвёртым и пятым, этого хватило для титула. Ferrari в гонке заняла седьмое и девятое места.") +
+    card("Норрис выиграл Гран-при Бразилии", "Сан-Паулу, 8 ноября", "Для Ландо Норриса это вторая победа подряд на трассе в Интерлагосе.") +
+    "<p class='note'>По материалам speedcafe.com, gpfans.com и racingnews365.com.</p>";
+}
+function render() {
+  var v = tab === "sch" ? viewSchedule() : tab === "std" ? viewStand() : tab === "live" ? viewLive() : tab === "trk" ? viewTracks() : viewNews();
+  document.getElementById("app").innerHTML = v;
+  if (tab === "live") { tickLive(); loadLive(); }
+  document.querySelectorAll("nav button").forEach(function (b) { b.setAttribute("aria-current", b.dataset.t === tab ? "true" : "false"); });
+}
+document.querySelector("nav").addEventListener("click", function (e) {
+  var b = e.target.closest("button");
+  if (!b) return;
+  tab = b.dataset.t; render(); window.scrollTo(0, 0);
+});
+render();
+setInterval(function () { if (tab === "sch") render(); else if (tab === "live") tickLive(); }, 1000);
+setInterval(function () { if (tab === "live") loadLive(); }, 10000);
+if (window.Telegram && window.Telegram.WebApp) {
+  window.Telegram.WebApp.ready();
+  window.Telegram.WebApp.expand();
+}
+</script>
+</body>
+</html>
