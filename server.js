@@ -303,6 +303,6 @@ app.post("/api/chat", (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("*", (_req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
+app.get("*", (_req, res) => res.sendFile(path.join(__dirname, "index.html")));
 
 app.listen(PORT, () => console.log(`F1 Dashboard running at http://localhost:${PORT}`));
