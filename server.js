@@ -16,6 +16,12 @@ app.use(express.json({ limit: "2kb" }));
 // Flat layout: serve only the three front-end files (not server.js / package.json).
 app.get("/app.js", (_req, res) => res.sendFile(path.join(__dirname, "app.js")));
 app.get("/styles.css", (_req, res) => res.sendFile(path.join(__dirname, "styles.css")));
+// PWA files (installable app): manifest, service worker, icons.
+app.get("/manifest.webmanifest", (_req, res) => res.type("application/manifest+json").sendFile(path.join(__dirname, "manifest.webmanifest")));
+app.get("/sw.js", (_req, res) => res.set("Cache-Control", "no-cache").type("application/javascript").sendFile(path.join(__dirname, "sw.js")));
+for (const f of ["icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"]) {
+  app.get("/" + f, (_req, res) => res.sendFile(path.join(__dirname, f)));
+}
 
 async function cached(key, ttlMs, loader) {
   const hit = cache.get(key);

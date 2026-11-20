@@ -236,5 +236,11 @@ function openTeams(){
 $("#team").onclick=openTeams;
 $("#theme").onclick=()=>{document.documentElement.classList.toggle("light");applyTeam();};
 if(window.Telegram?.WebApp){Telegram.WebApp.ready();Telegram.WebApp.expand();try{Telegram.WebApp.setHeaderColor("#0f1016");Telegram.WebApp.setBackgroundColor("#0f1016");}catch{}}
+// ---------- Install as an app (PWA) ----------
+if("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(()=>{});
+let installEvent=null;
+window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();installEvent=e;$("#install").hidden=false;});
+$("#install").onclick=async()=>{if(!installEvent)return;installEvent.prompt();await installEvent.userChoice.catch(()=>{});installEvent=null;$("#install").hidden=true;};
+window.addEventListener("appinstalled",()=>{$("#install").hidden=true;});
 applyTeam();
 render();
