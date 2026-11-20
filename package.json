@@ -1,19 +1,17 @@
 {
-  "name": "f1-fans-app",
+  "name": "f1-dashboard",
   "version": "1.0.0",
   "private": true,
+  "description": "Free Formula 1 dashboard with Node.js, Jolpica F1 and OpenF1",
+  "main": "server.js",
   "scripts": {
-    "dev": "tsx server.ts",
-    "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
+  "engines": { "node": ">=18" },
   "dependencies": {
-    "express": "^4.21.2"
-  },
-  "devDependencies": {
-    "@types/express": "^4.17.21",
-    "@types/node": "^22.10.0",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "rss-parser": "^3.13.0"
   }
 }
