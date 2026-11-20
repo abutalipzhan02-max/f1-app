@@ -242,5 +242,19 @@ let installEvent=null;
 window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();installEvent=e;$("#install").hidden=false;});
 $("#install").onclick=async()=>{if(!installEvent)return;installEvent.prompt();await installEvent.userChoice.catch(()=>{});installEvent=null;$("#install").hidden=true;};
 window.addEventListener("appinstalled",()=>{$("#install").hidden=true;});
+// iPhone / iPad: Safari has no install prompt, so show step-by-step instructions instead.
+const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+const isStandalone=!!(window.navigator.standalone||matchMedia("(display-mode: standalone)").matches);
+const inTelegram=!!window.Telegram?.WebApp?.initData;
+function openIosHelp(){
+  if($("#iosSheet"))return;
+  const el=document.createElement("div"); el.id="iosSheet"; el.className="sheet";
+  const steps=(inTelegram?['Нажмите <b>⋯</b> в правом верхнем углу и выберите <b>«Открыть в Safari»</b>.']:[])
+    .concat(['В Safari нажмите кнопку <b>«Поделиться»</b> (квадрат со стрелкой вверх).','Прокрутите меню и выберите <b>«На экран «Домой»»</b>.','Нажмите <b>«Добавить»</b>. Иконка F1 появится на главном экране.']);
+  el.innerHTML=`<div class="sheet-box"><div class="sheet-head"><h2>Установить на iPhone</h2><button class="ghost" id="iosClose" aria-label="Закрыть">✕</button></div><ol class="steps">${steps.map(s=>`<li>${s}</li>`).join("")}</ol><p class="small">Приложение откроется на весь экран, без адресной строки.</p></div>`;
+  el.onclick=e=>{if(e.target===el||e.target.closest("#iosClose"))el.remove();};
+  document.body.appendChild(el);
+}
+if(isIOS&&!isStandalone){const b=$("#install");b.hidden=false;b.onclick=openIosHelp;}
 applyTeam();
 render();
