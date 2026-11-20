@@ -12,7 +12,7 @@ const OPENF1 = "https://api.openf1.org/v1";
 const cache = new Map();
 
 app.set("trust proxy", 1);
-app.use(express.json({ limit: "2kb" }));
+app.use(express.static(__dirname));
 app.use(express.static(path.join(__dirname, "public")));
 
 async function cached(key, ttlMs, loader) {
