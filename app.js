@@ -140,22 +140,23 @@ const hue=n=>[...String(n)].reduce((h,c)=>(h*31+c.charCodeAt(0))%360,7);
 const myId=(()=>{try{let v=localStorage.getItem("f1cid");if(!v){v=Math.random().toString(36).slice(2,12);localStorage.setItem("f1cid",v);}return v;}catch{return "x"+Math.random().toString(36).slice(2,10);}})();
 const tgName=window.Telegram?.WebApp?.initDataUnsafe?.user?.first_name||"";
 const savedName=()=>{try{return localStorage.getItem("f1name")||tgName;}catch{return tgName;}};
-const msgHtml=m=>`<div class="msg ${m.cid===myId?"mine":""}"><div class="msg-head"><b style="color:hsl(${hue(m.name)} 80% 62%)">${esc(m.name)}</b><span class="small">${new Date(m.time).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</span></div><div class="msg-text">${esc(m.text)}</div></div>`;
+const isMine=m=>m.cid===myId||(auth.user&&m.cid==="u"+auth.user.id);
+const msgHtml=m=>`<div class="msg ${isMine(m)?"mine":""}"><div class="msg-head"><b style="color:hsl(${hue(m.name)} 80% 62%)">${esc(m.name)}</b><span class="small">${new Date(m.time).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</span></div><div class="msg-text">${esc(m.text)}</div></div>`;
 async function renderChat(){
-  content.innerHTML=title("Чат","Общение без регистрации · сообщения видят все")+`<div class="loading">Подключаемся…</div>`;
+  host().innerHTML=`<div class="loading">Подключаемся…</div>`;
   try{
     const d=await api("/api/chat");
-    content.innerHTML=title("Чат","Общение без регистрации · сообщения видят все")+
+    host().innerHTML=
       `<section class="card"><div class="card-head"><h2>Паддок-чат</h2><div class="small" id="online">онлайн: ${d.online||1}</div></div><div id="chatList" class="chat-list">${d.messages.length?d.messages.map(msgHtml).join(""):"<div class='empty' id='chatEmpty'>Пока тихо. Напишите первым!</div>"}</div>
-      <div class="chat-form"><input id="chatName" maxlength="20" placeholder="Ваш ник" value="${esc(savedName())}"><div class="chat-row"><input id="chatText" maxlength="300" placeholder="Сообщение…" autocomplete="off"><button id="chatSend" class="year">Отправить</button></div><div class="small" id="chatErr"></div></div></section>
-      <p class="source">Регистрация не нужна. Ссылки запрещены, сообщения не чаще раза в 2 секунды. История хранится недолго и стирается при перезапуске сервера. Будьте вежливы.</p>`;
+      <div class="chat-form"><input id="chatName" maxlength="20" placeholder="Ваш ник" value="${esc(auth.user?auth.user.displayName:savedName())}" ${auth.user?"disabled":""}><div class="chat-row"><input id="chatText" maxlength="300" placeholder="Сообщение…" autocomplete="off"><button id="chatSend" class="year">Отправить</button></div><div class="small" id="chatErr"></div></div></section>
+      <p class="source">Писать можно без аккаунта, с аккаунтом сообщения подписаны вашим именем. Ссылки запрещены, сообщения не чаще раза в 2 секунды. Будьте вежливы.</p>`;
     const list=$("#chatList"); const down=()=>{list.scrollTop=list.scrollHeight;}; down();
     const send=async()=>{
       const name=$("#chatName").value.trim()||"Гость", text=$("#chatText").value.trim(); if(!text)return;
       try{localStorage.setItem("f1name",name);}catch{}
       $("#chatSend").disabled=true;
       try{
-        const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,text,cid:myId})});
+        const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json",...(auth.token?{Authorization:"Bearer "+auth.token}:{})},body:JSON.stringify({name,text,cid:myId})});
         const j=await r.json(); if(!r.ok) throw new Error(j.error||"Ошибка"); $("#chatText").value=""; $("#chatErr").textContent="";
       }catch(e){$("#chatErr").textContent=e.message;}
       $("#chatSend").disabled=false; $("#chatText").focus();
@@ -165,21 +166,150 @@ async function renderChat(){
     chatES=new EventSource("/api/chat/stream");
     chatES.addEventListener("message",ev=>{
       const m=JSON.parse(ev.data); $("#chatEmpty")?.remove();
-      const atEnd=list.scrollHeight-list.scrollTop-list.clientHeight<80||m.cid===myId;
+      const atEnd=list.scrollHeight-list.scrollTop-list.clientHeight<80||isMine(m);
       list.insertAdjacentHTML("beforeend",msgHtml(m)); while(list.children.length>150)list.firstChild.remove();
       if(atEnd)down();
     });
     chatES.addEventListener("online",ev=>{const o=$("#online");if(o)o.textContent="онлайн: "+JSON.parse(ev.data).online;});
-  }catch(e){content.innerHTML=title("Чат","Общение без регистрации")+errorBox(e);}
+  }catch(e){host().innerHTML=errorBox(e);}
 }
+// ---------- Community: feed, profiles, accounts ----------
+const host=()=>$("#commBody")||content;
+let commTab="feed", feedTeam="", tgTried=false, authMode="login", feedPosts=[], feedMore=false, feedMod=false;
+const auth={token:null,user:null};
+try{auth.token=localStorage.getItem("f1token");}catch{}
+const hasTg=()=>!!window.Telegram?.WebApp?.initData;
+const teamById=id=>TEAMS.find(t=>t.id===id);
+const ago=iso=>{const s=(Date.now()-new Date(iso))/1000;if(s<60)return "только что";if(s<3600)return Math.floor(s/60)+" мин назад";if(s<86400)return Math.floor(s/3600)+" ч назад";return Math.floor(s/86400)+" дн назад";};
+const uav=(name,fav,big)=>{const c=teamById(fav)?.a||"#3a3a46";return `<span class="uav${big?" big":""}" style="background:${c};color:${lum(c)>.45?"#111":"#fff"}">${esc(initials(name))}</span>`;};
+function toast(msg){let t=$("#toast");if(!t){t=document.createElement("div");t.id="toast";document.body.appendChild(t);}t.textContent=msg;t.className="show";clearTimeout(toast.t);toast.t=setTimeout(()=>{t.className="";},2600);}
+async function authFetch(path,opts={}){
+  const headers={...(opts.headers||{})}; if(opts.body)headers["Content-Type"]="application/json";
+  if(auth.token)headers.Authorization="Bearer "+auth.token;
+  let r; try{r=await fetch(path,{...opts,headers,body:opts.body?JSON.stringify(opts.body):undefined});}catch{throw new Error("Нет связи с сервером.");}
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){const e=new Error(j.error||("Ошибка "+r.status));e.status=r.status;throw e;}
+  return j;
+}
+function setAuth(j){auth.token=j.token;auth.user=j.user;try{localStorage.setItem("f1token",j.token);}catch{}}
+function clearAuth(){auth.token=null;auth.user=null;try{localStorage.removeItem("f1token");}catch{}}
+async function loadMe(){
+  if(!auth.token){auth.user=null;return null;}
+  try{auth.user=(await authFetch("/api/me")).user;}catch(e){if(e.status===401)clearAuth();}
+  return auth.user;
+}
+async function tryTelegramLogin(){
+  if(!hasTg()||auth.user)return false;
+  try{setAuth(await authFetch("/api/auth/telegram",{method:"POST",body:{initData:Telegram.WebApp.initData}}));return true;}catch{return false;}
+}
+async function renderCommunity(){
+  const tabs=[["feed","Лента"],["chat","Чат"],["me","Профиль"]].map(([k,l])=>`<button data-comm="${k}" class="${commTab===k?"active":""}">${l}</button>`).join("");
+  content.innerHTML=title("Сообщество","Лента, чат и профили болельщиков")+`<div class="tabs">${tabs}</div><div id="commBody"><div class="loading">Загружаем…</div></div>`;
+  if(commTab!=="chat"&&chatES){chatES.close();chatES=null;}
+  let st={enabled:false,ready:false};
+  try{st=await api("/api/community/status");}catch{}
+  if(st.enabled&&st.ready){await loadMe();if(!auth.user&&!tgTried){tgTried=true;await tryTelegramLogin();}}
+  if(commTab==="chat")return renderChat();
+  if(!st.enabled||!st.ready){host().innerHTML=`<section class="card pad"><b>Лента и профили пока недоступны</b><p class="small">Для них нужна база данных на сервере (${st.enabled?"она ещё подключается, попробуйте через минуту":"не подключена"}). Чат при этом работает.</p><button class="year" data-comm="chat">Открыть чат</button></section>`;return;}
+  return commTab==="me"?renderProfile():renderFeed();
+}
+const teamOptions=sel=>TEAMS.map(t=>`<option value="${t.id}"${t.id===sel?" selected":""}>${esc(t.name)}</option>`).join("");
+const composerHtml=()=>auth.user
+  ?`<section class="card composer"><textarea id="postText" class="field" maxlength="1000" rows="3" placeholder="Что думаете о последней гонке?"></textarea><div class="composer-row"><select id="postTeam" class="select"><option value="">Без тега</option>${teamOptions("")}</select><button class="year" data-act="post">Опубликовать</button></div><div class="small err" id="postErr"></div></section>`
+  :`<section class="card pad"><b>Войдите, чтобы публиковать и комментировать</b><p class="small">Читать ленту можно без аккаунта.</p><button class="year" data-comm="me">Войти / регистрация</button></section>`;
+const postHtml=p=>`<article class="card post" data-post="${p.id}"><div class="post-head">${uav(p.displayName,p.favTeam)}<div class="post-who"><b>${esc(p.displayName)}</b><span class="small">@${esc(p.username)} · ${ago(p.createdAt)}</span></div>${p.team?`<span class="pill">${esc(teamById(p.team)?.name||"")}</span>`:""}</div><div class="post-text">${esc(p.text)}</div><div class="post-actions"><button data-act="like" class="${p.liked?"on":""}">♥ ${p.likes}</button><button data-act="comments">💬 ${p.comments}</button><button data-act="report" aria-label="Пожаловаться">⚑</button>${p.mine||feedMod?`<button data-act="del" aria-label="Удалить">🗑</button>`:""}</div><div class="comments" hidden></div></article>`;
+function drawFeed(){
+  const el=$("#feedList"); if(!el)return;
+  el.innerHTML=feedPosts.length?feedPosts.map(postHtml).join("")+(feedMore?`<button class="year more" data-act="more">Показать ещё</button>`:""):`<div class="empty">Пока нет публикаций. Станьте первым!</div>`;
+}
+async function renderFeed(append){
+  if(!append){host().innerHTML=composerHtml()+`<select id="feedTeam" class="select"><option value="">Все команды</option>${teamOptions(feedTeam)}</select><div id="feedList"><div class="loading">Загружаем ленту…</div></div>`;feedPosts=[];}
+  try{
+    const last=append&&feedPosts.length?feedPosts[feedPosts.length-1].id:"";
+    const d=await authFetch(`/api/posts?${feedTeam?`team=${feedTeam}&`:""}${last?`before=${last}`:""}`);
+    feedMod=d.canModerate; feedPosts=feedPosts.concat(d.posts); feedMore=d.posts.length===20; drawFeed();
+  }catch(e){const el=$("#feedList");if(el)el.innerHTML=errorBox(e);}
+}
+async function loadComments(id,box){
+  box.innerHTML='<div class="small">Загружаем…</div>';
+  const d=await authFetch(`/api/posts/${id}/comments`);
+  box.innerHTML=d.comments.map(c=>`<div class="comment" data-cid="${c.id}"><b>${esc(c.displayName)}</b> <span class="small">@${esc(c.username)} · ${ago(c.createdAt)}</span><div class="post-text">${esc(c.text)}</div>${c.mine||d.canModerate?`<button class="link-btn" data-act="cdel">Удалить</button>`:""}</div>`).join("")
+    +(auth.user?`<div class="chat-row"><input class="field" maxlength="500" placeholder="Комментарий…" data-cinput><button class="year" data-act="csend">OK</button></div>`:`<div class="small">Войдите, чтобы комментировать.</div>`);
+  const btn=box.closest(".post")?.querySelector('[data-act="comments"]'); if(btn)btn.textContent="💬 "+d.comments.length;
+}
+const authForm=()=>`<section class="card pad"><div class="tabs"><button data-auth="login" class="${authMode==="login"?"active":""}">Вход</button><button data-auth="register" class="${authMode==="register"?"active":""}">Регистрация</button></div><div class="form"><input id="auUser" class="field" placeholder="Логин (латиница, цифры, _)" autocapitalize="none" autocorrect="off" autocomplete="username">${authMode==="register"?'<input id="auName" class="field" maxlength="30" placeholder="Имя на сайте">':""}<input id="auPass" class="field" type="password" placeholder="Пароль (от 8 символов)" autocomplete="${authMode==="login"?"current-password":"new-password"}"><button class="year" data-act="auth">${authMode==="login"?"Войти":"Создать аккаунт"}</button><div class="small err" id="auErr"></div>${hasTg()?'<button class="year" data-act="tglogin">Войти через Telegram</button>':'<p class="small">Внутри Telegram вход происходит автоматически.</p>'}</div></section>`;
+async function renderProfile(){
+  if(!auth.user){host().innerHTML=authForm();return;}
+  host().innerHTML='<div class="loading">Загружаем профиль…</div>';
+  try{
+    const u=auth.user, d=await authFetch(`/api/users/${u.username}`); feedMod=false;
+    let html=`<section class="card pad profile"><div class="profile-top">${uav(u.displayName,u.favTeam,true)}<div><div class="item-title">${esc(u.displayName)}</div><div class="small">@${esc(u.username)}${u.role!=="user"?` · <span class="pill">${esc(u.role)}</span>`:""}</div></div></div><div class="form"><label class="small">Имя</label><input id="pfName" class="field" maxlength="30" value="${esc(u.displayName)}"><label class="small">О себе</label><textarea id="pfBio" class="field" maxlength="160" rows="2">${esc(u.bio)}</textarea><label class="small">Любимая команда</label><select id="pfTeam" class="select"><option value="">Не выбрана</option>${teamOptions(u.favTeam)}</select><div class="composer-row"><button class="year" data-act="saveProfile">Сохранить</button><button class="year" data-act="logout">Выйти</button></div><div class="small" id="pfMsg"></div></div></section>`;
+    if(["admin","moderator"].includes(u.role)){
+      try{const r=await authFetch("/api/admin/reports");html+=card("Жалобы",r.reports.length?r.reports.map(x=>`<div class="session"><b>@${esc(x.author)}: ${esc(x.text.slice(0,120))}</b><time>Причина: ${esc(x.reason)} · от @${esc(x.reporter)}</time><div class="composer-row"><button class="year" data-act="repdel" data-rid="${x.id}">Удалить пост</button><button class="year" data-act="repkeep" data-rid="${x.id}">Оставить</button></div></div>`).join(""):"<div class='empty'>Новых жалоб нет.</div>");}catch{}
+    }
+    html+=`<h2 class="sec">Мои публикации</h2>`+(d.posts.length?d.posts.map(postHtml).join(""):"<div class='empty'>Пока нет публикаций.</div>")+`<section class="card pad"><button class="year danger" data-act="delacc">Удалить аккаунт</button><p class="small">Профиль будет обезличен, публикации скрыты.</p></section>`;
+    host().innerHTML=html;
+  }catch(e){host().innerHTML=errorBox(e);}
+}
+async function submitPost(){
+  const text=($("#postText").value||"").trim(), err=$("#postErr"); if(!text)return;
+  try{
+    const r=await authFetch("/api/posts",{method:"POST",body:{text,team:$("#postTeam").value}});
+    $("#postText").value="";err.textContent="";feedPosts.unshift(r.post);drawFeed();
+  }catch(e){err.textContent=e.message;}
+}
+content.addEventListener("change",e=>{if(e.target.id==="feedTeam"){feedTeam=e.target.value;renderFeed();}});
+content.addEventListener("click",async e=>{
+  const c=e.target.closest("[data-comm]");if(c){commTab=c.dataset.comm;renderCommunity();return;}
+  const m=e.target.closest("[data-auth]");if(m){authMode=m.dataset.auth;renderProfile();return;}
+  const btn=e.target.closest("[data-act]");if(!btn)return;
+  const a=btn.dataset.act, postEl=btn.closest(".post"), id=postEl?.dataset.post;
+  const sure=(label,ms=3000)=>{if(btn.dataset.sure==="1")return true;const old=btn.textContent;btn.dataset.sure="1";btn.textContent=label;setTimeout(()=>{btn.dataset.sure="";btn.textContent=old;},ms);return false;};
+  try{
+    if(a==="more")return renderFeed(true);
+    if(a==="post")return submitPost();
+    if(a==="auth"){
+      const body={username:$("#auUser").value.trim(),password:$("#auPass").value};
+      if(authMode==="register")body.displayName=$("#auName").value.trim();
+      try{setAuth(await authFetch(authMode==="login"?"/api/auth/login":"/api/auth/register",{method:"POST",body}));renderCommunity();}
+      catch(err){$("#auErr").textContent=err.message;}
+      return;
+    }
+    if(a==="tglogin"){const ok=await tryTelegramLogin();if(ok)renderCommunity();else toast("Не удалось войти через Telegram.");return;}
+    if(a==="logout"){try{await authFetch("/api/auth/logout",{method:"POST"});}catch{}clearAuth();renderCommunity();return;}
+    if(a==="saveProfile"){
+      const r=await authFetch("/api/me",{method:"PATCH",body:{displayName:$("#pfName").value,bio:$("#pfBio").value,favTeam:$("#pfTeam").value}});
+      auth.user=r.user;$("#pfMsg").textContent="Сохранено.";return;
+    }
+    if(a==="delacc"){if(!sure("Точно удалить?"))return;await authFetch("/api/me",{method:"DELETE"});clearAuth();toast("Аккаунт удалён.");renderCommunity();return;}
+    if(a==="repdel"||a==="repkeep"){await authFetch(`/api/admin/reports/${btn.dataset.rid}/resolve`,{method:"POST",body:{deletePost:a==="repdel"}});renderProfile();return;}
+    if(!auth.user&&["like","report","comments"].includes(a)&&a!=="comments"){commTab="me";renderCommunity();return;}
+    if(a==="like"){const r=await authFetch(`/api/posts/${id}/like`,{method:"POST"});btn.classList.toggle("on",r.liked);btn.textContent="♥ "+r.likes;return;}
+    if(a==="report"){await authFetch(`/api/posts/${id}/report`,{method:"POST",body:{reason:"Нарушение правил"}});btn.textContent="✓";toast("Жалоба отправлена модераторам.");return;}
+    if(a==="del"){if(!sure("Точно?"))return;await authFetch(`/api/posts/${id}`,{method:"DELETE"});feedPosts=feedPosts.filter(p=>String(p.id)!==id);postEl.remove();return;}
+    if(a==="comments"){const box=postEl.querySelector(".comments");box.hidden=!box.hidden;if(!box.hidden)await loadComments(id,box);return;}
+    if(a==="csend"){
+      const box=btn.closest(".comments"),inp=box.querySelector("[data-cinput]"),text=inp.value.trim();if(!text)return;
+      await authFetch(`/api/posts/${id}/comments`,{method:"POST",body:{text}});await loadComments(id,box);return;
+    }
+    if(a==="cdel"){
+      if(!sure("Точно?"))return;
+      const box=btn.closest(".comments");await authFetch(`/api/comments/${btn.closest(".comment").dataset.cid}`,{method:"DELETE"});await loadComments(id,box);return;
+    }
+  }catch(err){
+    if(err.status===401){clearAuth();commTab="me";renderCommunity();return;}
+    if(a==="csend"){toast(err.message);return;}
+    toast(err.message);
+  }
+});
 async function render(){
-  if(chatES&&tab!=="chat"){chatES.close();chatES=null;}
+  if(chatES&&tab!=="community"){chatES.close();chatES=null;}
   document.querySelectorAll("[data-tab]").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));
   if(tab==="schedule")return renderSchedule();
   if(tab==="standings")return renderStandings();
   if(tab==="live")return renderLive();
   if(tab==="tracks")return renderTracks();
-  if(tab==="chat")return renderChat();
+  if(tab==="community")return renderCommunity();
   return renderNews();
 }
 document.querySelector(".nav").addEventListener("click",e=>{const b=e.target.closest("[data-tab]");if(!b)return;tab=b.dataset.tab;render();window.scrollTo({top:0,behavior:"smooth"});});

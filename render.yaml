@@ -1,7 +1,15 @@
+databases:
+  - name: f1-db
+    plan: free
+    region: oregon
+    databaseName: f1
+    user: f1
+
 services:
   - type: web
     name: f1-app
     runtime: node
+    region: oregon
     plan: free
     buildCommand: npm install
     startCommand: npm start
@@ -9,3 +17,11 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 20
+      - key: DATABASE_URL
+        fromDatabase:
+          name: f1-db
+          property: connectionString
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_USERNAMES
+        sync: false

@@ -19,7 +19,7 @@ app.get("/styles.css", (_req, res) => res.sendFile(path.join(__dirname, "styles.
 // PWA files (installable app): manifest, service worker, icons.
 app.get("/manifest.webmanifest", (_req, res) => res.type("application/manifest+json").sendFile(path.join(__dirname, "manifest.webmanifest")));
 app.get("/sw.js", (_req, res) => res.set("Cache-Control", "no-cache").type("application/javascript").sendFile(path.join(__dirname, "sw.js")));
-for (const f of ["icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"]) {
+for (const f of ["icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png", "logo-f1.png"]) {
   app.get("/" + f, (_req, res) => res.sendFile(path.join(__dirname, f)));
 }
 
@@ -292,6 +292,7 @@ app.get("/api/highlights", async (_req, res) => {
 // Messages live in memory: they reset when Render restarts the service.
 const CHAT_MAX = 200, CHAT_TEXT = 300, CHAT_NAME = 20, CHAT_COOLDOWN_MS = 2000;
 const chat = { messages: [], clients: new Set(), nextId: 1 };
+let community = null; // set below when community.js is present
 const lastPost = new Map();
 const clean = (v, max) => String(v ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
 const LINK_RE = /(https?:\/\/|www\.|t\.me\/|\b[a-z0-9-]+\.(com|ru|net|org|io|me|kz|xyz|link)\b)/i;
@@ -314,10 +315,11 @@ function broadcast(event, data) {
 setInterval(() => { for (const c of chat.clients) { try { c.write(": ping\n\n"); } catch {} } }, 25000);
 setInterval(() => { const old = Date.now() - 60000; for (const [k, t] of lastPost) if (t < old) lastPost.delete(k); }, 60000);
 
-app.post("/api/chat", (req, res) => {
-  const name = clean(req.body?.name, CHAT_NAME) || "Гость";
+app.post("/api/chat", async (req, res) => {
+  const account = community ? await community.userFromReq(req) : null;
+  const name = account ? clean(account.display_name, CHAT_NAME) : (clean(req.body?.name, CHAT_NAME) || "Гость");
   const text = clean(req.body?.text, CHAT_TEXT);
-  const cid = clean(req.body?.cid, 24);
+  const cid = account ? "u" + account.id : clean(req.body?.cid, 24);
   if (!text) return res.status(400).json({ error: "Пустое сообщение." });
   if (LINK_RE.test(text) || LINK_RE.test(name)) return res.status(400).json({ error: "Ссылки в чате запрещены." });
   const key = req.ip;
@@ -328,6 +330,7 @@ app.post("/api/chat", (req, res) => {
   chat.messages.push(msg);
   if (chat.messages.length > CHAT_MAX) chat.messages.shift();
   broadcast("message", msg);
+  community?.saveChat(msg, account?.id);
   res.json({ ok: true });
 });
 
@@ -355,6 +358,11 @@ app.get("/api/track/:key", async (req, res) => {
     res.status(404).json({ error: "Карта трассы недоступна.", detail: e.message });
   }
 });
+
+// ---------- Community (accounts, posts, comments, chat history) ----------
+try { community = require("./community")(app, { chat, clean, LINK_RE }); }
+catch (e) { console.error("Community disabled:", e.message); }
+app.get("/api/community/status", (_req, res) => res.json(community ? community.status() : { enabled: false, ready: false, telegram: false }));
 
 app.get("*", (_req, res) => res.sendFile(path.join(__dirname, "index.html")));
 
