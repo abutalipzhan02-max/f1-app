@@ -15,27 +15,31 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",
 const date = (s, timeZone) => s && !isNaN(new Date(s)) ? new Intl.DateTimeFormat("ru-RU",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",...(timeZone?{timeZone}:{})}).format(new Date(s)) : "Время уточняется";
 const initials = n => String(n||"").replace(/[^\p{L}\s]/gu,"").trim().split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase() || "?";
 const avatar = (src,name) => `<span class="avatar"><b>${esc(initials(name))}</b>${src?`<img loading="lazy" referrerpolicy="no-referrer" src="${esc(src)}" alt="" onerror="this.remove()">`:""}</span>`;
+const badge = n => {const c=teamColor(n);return `<span class="badge" style="--tc:${c};color:${lum(c)>.45?"#111":"#fff"}">${esc(initials(n))}</span>`;};
 const title = (h,sub) => `<h1>${h}</h1><p class="subtitle">${sub}</p>`;
 const card = (h,body) => `<section class="card"><div class="card-head"><h2>${h}</h2></div>${body}</section>`;
 function errorBox(e){return `<div class="error">${esc(e.message)}<br><button class="year" onclick="location.reload()">Повторить</button></div>`;}
 
+const weekendRange=r=>{const end=new Date(r.date+"T12:00:00Z");if(isNaN(end))return esc(r.date||"");const start=new Date(end.getTime()-2*864e5);const m=d=>d.toLocaleDateString("ru-RU",{month:"short",timeZone:"UTC"}).replace(".","").toUpperCase();const dd=d=>String(d.getUTCDate()).padStart(2,"0");return start.getUTCMonth()===end.getUTCMonth()?`${dd(start)} – ${dd(end)} ${m(end)}`:`${dd(start)} ${m(start)} – ${dd(end)} ${m(end)}`;};
+const flagIcon='<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 21V4M6 4h12l-2.5 4 2.5 4H6"/></svg>';
 async function renderSchedule(){
-  content.innerHTML=title("Календарь сезона","Официальные даты и сессии · время по часовому поясу устройства")+`<div class="loading">Загружаем календарь…</div>`;
+  content.innerHTML=title("Расписание","Официальные даты и сессии · время по часовому поясу устройства")+`<div class="loading">Загружаем календарь…</div>`;
   try{
     const d=await api("/api/schedule",3600000);
     if(!d.races.length) throw new Error("Календарь пока не опубликован источником.");
     const now=Date.now();
-    const next=d.races.find(r=>new Date(r.date+"T"+(r.time||"00:00:00Z")).getTime()>now);
-    let html=next?`<section class="card hero"><span class="pill">СЛЕДУЮЩИЙ ЭТАП</span><h2 style="margin-top:10px">${esc(next.name)}</h2><div class="number">${esc(next.date)}</div><div class="muted">${esc(next.locality)}, ${esc(next.country)}</div>${watchLink}</section>`:"<section class='card pad'>Сезон завершён или календарь ещё не загружен.</section>";
+    const raceTime=r=>new Date(r.date+"T"+(r.time||"00:00:00Z")).getTime();
+    const next=d.races.find(r=>raceTime(r)>now);
+    let html="";
     for(const r of d.races){
       const sessions=(r.sessions||[]).sort((a,b)=>new Date(a.dateStart)-new Date(b.dateStart));
-      html+=`<section class="card"><div class="card-head"><h2>${String(r.round).padStart(2,"0")} · ${esc(r.name)}</h2><div class="small">${esc(r.circuit)} · ${esc(r.locality)}, ${esc(r.country)}</div></div>`;
-      html+=`<div class="session"><b>Гонка</b><time>${date(r.date+"T"+(r.time||"00:00:00Z"))}</time></div>`;
-      for(const s of sessions) html+=`<div class="session"><b>${esc(s.name)}</b><time>${date(s.dateStart)}</time></div>`;
-      html+="</section>";
+      const isNext=next&&r.round===next.round;
+      const short=String(r.name||"").replace(/\s*Grand Prix$/i,"");
+      html+=`<section class="card race${isNext?" next":""}"><div class="race-top"><span class="round">Раунд ${r.round}</span>${isNext?'<span class="tag-next">Далее</span>':""}</div><div class="race-title">${esc(short)}</div><div class="race-name">${esc(r.name)} ${esc(d.season)}</div><div class="race-bottom"><span class="date-pill">${flagIcon}${weekendRange(r)}</span>${r.circuitKey?`<div class="track mini" data-key="${esc(r.circuitKey)}"></div>`:""}</div>${isNext?watchLink:""}<details class="sess"><summary>Сессии</summary><div class="session"><b>Гонка</b><time>${date(r.date+"T"+(r.time||"00:00:00Z"))}</time></div>${sessions.map(s=>`<div class="session"><b>${esc(s.name)}</b><time>${date(s.dateStart)}</time></div>`).join("")}</details></section>`;
     }
-    content.innerHTML=title("Календарь сезона",`Сезон ${d.season} · даты из Jolpica F1`)+html+`<p class="source">Время сессий показано по часовому поясу телефона. Если OpenF1 ещё не опубликовал сессии, отображается только дата гонки. Источники: Jolpica F1, OpenF1.</p>`;
-  }catch(e){content.innerHTML=title("Календарь сезона","Данные загружаются с серверов")+errorBox(e);}
+    content.innerHTML=title("Расписание",`Сезон ${d.season}`)+html+`<p class="source">Время сессий показано по часовому поясу телефона. Если OpenF1 ещё не опубликовал сессии, отображается только дата гонки. Источники: Jolpica F1, OpenF1.</p>`;
+    loadTracks();
+  }catch(e){content.innerHTML=title("Расписание","Данные загружаются с серверов")+errorBox(e);}
 }
 async function renderStandings(){
   content.innerHTML=title("Чемпионат","Очки и позиции из базы Jolpica F1")+`<div class="loading">Загружаем таблицу…</div>`;
@@ -43,7 +47,7 @@ async function renderStandings(){
     const d=await api("/api/standings",300000);
     const rows=standingsTab==="drivers"?d.drivers:d.constructors;
     let html=`<div class="tabs"><button data-stand="drivers" class="${standingsTab==="drivers"?"active":""}">Пилоты</button><button data-stand="teams" class="${standingsTab==="teams"?"active":""}">Команды</button></div>`;
-    html+=card(standingsTab==="drivers"?"Личный зачёт":"Кубок конструкторов",rows.length?rows.map(x=>`<div class="item ${standingsTab==="drivers"?"has-av":""}"><span class="rank">${x.position}</span>${standingsTab==="drivers"?avatar(x.photo,x.name):""}<div><div class="item-title">${esc(x.name)}</div><div class="item-sub">${esc(x.team||x.nationality||"")} ${x.wins?`· ${x.wins} побед`:""}</div></div><span class="points">${x.points}</span></div>`).join(""):`<div class="empty">Официальные очки за этот сезон пока не опубликованы.</div>`);
+    html+=card(standingsTab==="drivers"?"Личный зачёт":"Кубок конструкторов",rows.length?rows.map(x=>`<div class="item tc has-av" style="--tc:${teamColor(standingsTab==="drivers"?x.team:x.name)}"><span class="rank">${x.position}</span>${standingsTab==="drivers"?avatar(x.photo,x.name):badge(x.name)}<div><div class="item-title">${esc(x.name)}</div><div class="item-sub">${esc(x.team||x.nationality||"")} ${x.wins?`· ${x.wins} побед`:""}</div></div><span class="points">${x.points}</span></div>`).join(""):`<div class="empty">Официальные очки за этот сезон пока не опубликованы.</div>`);
     content.innerHTML=title("Чемпионат",`Сезон ${d.season}${d.round?` · после этапа ${d.round}`:""} · Jolpica F1`)+html+`<p class="source">Если сезон ещё не начался или источник не содержит результатов, таблица будет пустой — приложение не подставляет вымышленные очки.</p>`;
   }catch(e){content.innerHTML=title("Чемпионат","Результаты сезона")+errorBox(e);}
 }
@@ -69,7 +73,7 @@ async function loadSession(key){
     for(const p of d.positions){const old=latest.get(p.driver_number);if(!old||new Date(p.date)>new Date(old.date))latest.set(p.driver_number,p);}
     const resultMap=new Map(d.results.map(x=>[x.driver_number,x]));
     const order=[...latest.values()].sort((a,b)=>a.position-b.position);
-    const classification=order.length?order.map(p=>{const dr=drivers.get(p.driver_number)||{};const rr=resultMap.get(p.driver_number)||{};return `<div class="item has-av"><span class="rank">${p.position}</span>${avatar(dr.headshot_url,dr.full_name||dr.name_acronym||("№"+p.driver_number))}<div><div class="item-title">${esc(dr.name_acronym||dr.full_name||("№"+p.driver_number))}</div><div class="item-sub">${esc(dr.team_name||"")}</div></div><span class="points">${rr.gap_to_leader===0?"P1":rr.gap_to_leader!=null?`+${rr.gap_to_leader}s`:"—"}</span></div>`;}).join(""):"<div class='empty'>Позиции для этой сессии не опубликованы.</div>";
+    const classification=order.length?order.map(p=>{const dr=drivers.get(p.driver_number)||{};const rr=resultMap.get(p.driver_number)||{};return `<div class="item tc has-av" style="--tc:${dr.team_colour?"#"+esc(dr.team_colour):"#3a3a46"}"><span class="rank">${p.position}</span>${avatar(dr.headshot_url,dr.full_name||dr.name_acronym||("№"+p.driver_number))}<div><div class="item-title">${esc(dr.name_acronym||dr.full_name||("№"+p.driver_number))}</div><div class="item-sub">${esc(dr.team_name||"")}</div></div><span class="points">${rr.gap_to_leader===0?"P1":rr.gap_to_leader!=null?`+${rr.gap_to_leader}s`:"—"}</span></div>`;}).join(""):"<div class='empty'>Позиции для этой сессии не опубликованы.</div>";
     const w=d.weather;
     target.innerHTML=card("Классификация",classification)+
       (w?`<div class="grid2"><div class="stat"><strong>${w.air_temperature??"—"}°</strong><span>Температура воздуха</span></div><div class="stat"><strong>${w.track_temperature??"—"}°</strong><span>Температура трассы</span></div><div class="stat"><strong>${w.humidity??"—"}%</strong><span>Влажность</span></div><div class="stat"><strong>${w.rainfall?"Да":"Нет"}</strong><span>Дождь</span></div></div>`:"")+
@@ -198,6 +202,8 @@ const TEAMS=[
   {id:"haas",name:"Haas",a:"#E6002B",b:"#FFFFFF"},
   {id:"cadillac",name:"Cadillac",a:"#FFFFFF",b:"#000000",l:"#000000"}
 ];
+const TEAM_ALIASES=[["mclaren","mclaren"],["mercedes","mercedes"],["red bull","redbull"],["ferrari","ferrari"],["williams","williams"],["racing bulls","racingbulls"],["rb f1","racingbulls"],["aston","astonmartin"],["audi","audi"],["sauber","audi"],["alpine","alpine"],["haas","haas"],["cadillac","cadillac"]];
+const teamColor=n=>{const s=String(n||"").toLowerCase();const hit=TEAM_ALIASES.find(([k])=>s.includes(k));const t=hit&&TEAMS.find(x=>x.id===hit[1]);return t?t.a:"#3a3a46";};
 const hex2=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16));
 const mix=(h1,h2,t)=>"#"+hex2(h1).map((v,i)=>Math.round(v*(1-t)+hex2(h2)[i]*t).toString(16).padStart(2,"0")).join("");
 const lum=h=>{const [r,g,b]=hex2(h).map(v=>{v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4);});return .2126*r+.7152*g+.0722*b;};
@@ -206,7 +212,7 @@ let teamId=(()=>{try{return localStorage.getItem("f1team")||"";}catch{return "";
 function applyTeam(){
   const root=document.documentElement, light=root.classList.contains("light"), t=TEAMS.find(x=>x.id===teamId);
   const keys=["--red","--yellow","--glow1","--glow2","--soft","--on","--bg"];
-  let bg=light?"#eceff5":"#0f1016";
+  let bg=light?"#f5f4f1":"#15151e";
   if(!t){keys.forEach(k=>root.style.removeProperty(k));}
   else{
     let a=t.a;
@@ -234,8 +240,8 @@ function openTeams(){
   document.body.appendChild(el);
 }
 $("#team").onclick=openTeams;
-$("#theme").onclick=()=>{document.documentElement.classList.toggle("light");applyTeam();};
-if(window.Telegram?.WebApp){Telegram.WebApp.ready();Telegram.WebApp.expand();try{Telegram.WebApp.setHeaderColor("#0f1016");Telegram.WebApp.setBackgroundColor("#0f1016");}catch{}}
+$("#theme").onclick=()=>{const l=document.documentElement.classList.toggle("light");try{localStorage.setItem("f1theme",l?"light":"dark");}catch{}applyTeam();};
+if(window.Telegram?.WebApp){Telegram.WebApp.ready();Telegram.WebApp.expand();try{Telegram.WebApp.setHeaderColor("#15151e");Telegram.WebApp.setBackgroundColor("#15151e");}catch{}}
 // ---------- Install as an app (PWA) ----------
 if("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(()=>{});
 let installEvent=null;
