@@ -8,7 +8,7 @@ const TEAM_IDS = ["mclaren", "mercedes", "redbull", "ferrari", "williams", "raci
 const scrypt = (pw, salt) => new Promise((res, rej) => crypto.scrypt(pw, salt, 64, { N: 16384, r: 8, p: 1 }, (e, k) => e ? rej(e) : res(k)));
 const sha = v => crypto.createHash("sha256").update(v).digest("hex");
 
-module.exports = function community(app, { chat, clean, LINK_RE }) {
+module.exports = function community(app, { chat, clean, LINK_RE, jolpica, cached, YEAR }) {
   const url = process.env.DATABASE_URL;
   const admins = (process.env.ADMIN_USERNAMES || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
   let pool = null, dbOk = false;
@@ -33,6 +33,10 @@ module.exports = function community(app, { chat, clean, LINK_RE }) {
     await q(`CREATE TABLE IF NOT EXISTS reports (id SERIAL PRIMARY KEY, post_id INT REFERENCES posts(id), comment_id INT REFERENCES comments(id),
       user_id INT NOT NULL REFERENCES users(id), reason TEXT NOT NULL DEFAULT '', resolved BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (post_id, user_id), UNIQUE (comment_id, user_id))`);
+    await q(`CREATE TABLE IF NOT EXISTS predictions (user_id INT NOT NULL REFERENCES users(id), season INT NOT NULL, round INT NOT NULL,
+      p1 TEXT NOT NULL, p2 TEXT NOT NULL, p3 TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id, season, round))`);
+    await q(`CREATE TABLE IF NOT EXISTS follows (follower_id INT NOT NULL REFERENCES users(id), followee_id INT NOT NULL REFERENCES users(id), created_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (follower_id, followee_id))`);
     await q(`CREATE TABLE IF NOT EXISTS chat_messages (id SERIAL PRIMARY KEY, user_id INT, name TEXT NOT NULL, text TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
     const { rows } = await q(`SELECT id, user_id, name, text, created_at FROM chat_messages ORDER BY id DESC LIMIT 200`);
     chat.messages = rows.reverse().map(r => ({ id: r.id, name: r.name, text: r.text, cid: r.user_id ? "u" + r.user_id : "", time: r.created_at.toISOString() }));
@@ -178,7 +182,7 @@ module.exports = function community(app, { chat, clean, LINK_RE }) {
     const me = await userFromReq(req);
     const team = TEAM_IDS.includes(req.query.team) ? req.query.team : null;
     const before = /^\d+$/.test(req.query.before || "") ? Number(req.query.before) : null;
-    const { rows } = await q(`${POST_SQL} AND ($2::text IS NULL OR p.team = $2) AND ($3::int IS NULL OR p.id < $3) ORDER BY p.id DESC LIMIT 20`, [me?.id ?? null, team, before]);
+    const { rows } = await q(`${POST_SQL} AND ($2::text IS NULL OR p.team = $2) AND ($3::int IS NULL OR p.id < $3) AND ($4::boolean IS NOT TRUE OR p.user_id IN (SELECT followee_id FROM follows WHERE follower_id = $1::int)) ORDER BY p.id DESC LIMIT 20`, [me?.id ?? null, team, before, req.query.scope === "following" && !!me]);
     res.json({ posts: rows.map(r => postOut(r, me)), canModerate: !!me && staff(me) });
   }));
   app.post("/api/posts", needDb, auth, wrap(async (req, res) => {
@@ -236,13 +240,108 @@ module.exports = function community(app, { chat, clean, LINK_RE }) {
     res.json({ ok: true });
   }));
 
+  // ---------- achievements, levels, follows ----------
+  const ACH = [
+    { id: "first_post", icon: "🏁", title: "Первый заезд", desc: "Опубликуйте первый пост", test: s => s.posts >= 1 },
+    { id: "author", icon: "✍️", title: "Автор", desc: "10 публикаций", test: s => s.posts >= 10 },
+    { id: "commenter", icon: "💬", title: "Болтун паддока", desc: "10 комментариев", test: s => s.comments >= 10 },
+    { id: "liked", icon: "❤️", title: "Любимец трибун", desc: "10 лайков на ваших постах", test: s => s.likes >= 10 },
+    { id: "predictor", icon: "🎯", title: "Предсказатель", desc: "Сделайте первый прогноз", test: s => s.predictions >= 1 },
+    { id: "strategist", icon: "🧠", title: "Стратег", desc: "Сделайте 5 прогнозов", test: s => s.predictions >= 5 },
+    { id: "popular", icon: "⭐", title: "Звезда сообщества", desc: "5 подписчиков", test: s => s.followers >= 5 },
+    { id: "social", icon: "🤝", title: "Дружелюбный", desc: "Подпишитесь на 3 человек", test: s => s.following >= 3 },
+    { id: "fan", icon: "🏆", title: "Верный фанат", desc: "Выберите любимую команду", test: (_s, u) => !!u.fav_team }
+  ];
+  async function profileStats(user) {
+    const { rows } = await q(`SELECT
+      (SELECT count(*) FROM posts WHERE user_id = $1 AND NOT deleted) AS posts,
+      (SELECT count(*) FROM comments WHERE user_id = $1 AND NOT deleted) AS comments,
+      (SELECT count(*) FROM likes l JOIN posts p ON p.id = l.post_id WHERE p.user_id = $1 AND NOT p.deleted AND l.user_id <> $1) AS likes,
+      (SELECT count(*) FROM predictions WHERE user_id = $1) AS predictions,
+      (SELECT count(*) FROM follows WHERE followee_id = $1) AS followers,
+      (SELECT count(*) FROM follows WHERE follower_id = $1) AS following`, [user.id]);
+    const s = Object.fromEntries(Object.entries(rows[0]).map(([k, v]) => [k, Number(v)]));
+    const xp = s.posts * 10 + s.comments * 3 + s.likes * 2 + s.predictions * 15 + s.followers * 5;
+    return { stats: s, xp, level: 1 + Math.floor(xp / 100), followers: s.followers, following: s.following,
+      achievements: ACH.map(a => ({ id: a.id, icon: a.icon, title: a.title, desc: a.desc, earned: a.test(s, user) })) };
+  }
+  app.post("/api/users/:username/follow", needDb, auth, limit("follow", 60, 600000), wrap(async (req, res) => {
+    const { rows } = await q(`SELECT id FROM users WHERE username = $1 AND NOT banned`, [String(req.params.username).toLowerCase()]);
+    if (!rows[0]) return res.status(404).json({ error: "Пользователь не найден." });
+    if (rows[0].id === req.user.id) return res.status(400).json({ error: "Нельзя подписаться на себя." });
+    const del = await q(`DELETE FROM follows WHERE follower_id = $1 AND followee_id = $2`, [req.user.id, rows[0].id]);
+    if (!del.rowCount) await q(`INSERT INTO follows (follower_id, followee_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [req.user.id, rows[0].id]);
+    const n = await q(`SELECT count(*) AS n FROM follows WHERE followee_id = $1`, [rows[0].id]);
+    res.json({ following: !del.rowCount, followers: Number(n.rows[0].n) });
+  }));
+
   // ---------- public profiles ----------
   app.get("/api/users/:username", needDb, wrap(async (req, res) => {
     const me = await userFromReq(req);
     const { rows } = await q(`SELECT * FROM users WHERE username = $1 AND NOT banned`, [String(req.params.username).toLowerCase()]);
     if (!rows[0]) return res.status(404).json({ error: "Пользователь не найден." });
     const posts = await q(`${POST_SQL} AND p.user_id = $2 ORDER BY p.id DESC LIMIT 20`, [me?.id ?? null, rows[0].id]);
-    res.json({ user: publicUser(rows[0]), posts: posts.rows.map(r => postOut(r, me)) });
+    const extra = await profileStats(rows[0]);
+    let isFollowing = false;
+    if (me && me.id !== rows[0].id) isFollowing = (await q(`SELECT 1 FROM follows WHERE follower_id = $1 AND followee_id = $2`, [me.id, rows[0].id])).rowCount > 0;
+    res.json({ user: publicUser(rows[0]), posts: posts.rows.map(r => postOut(r, me)), ...extra, isFollowing, isMe: !!me && me.id === rows[0].id });
+  }));
+
+
+  // ---------- predictions (podium) ----------
+  const codeOf = d => d.code || String(d.driverId || "").slice(0, 3).toUpperCase();
+  const raceTime = r => new Date(`${r.date}T${r.time || "00:00:00Z"}`).getTime();
+  const scheduleOf = () => cached(`pred-schedule-${YEAR}`, 6 * 3600e3, async () => (await jolpica(`${YEAR}.json?limit=100`)).MRData?.RaceTable?.Races || []);
+  const driversOf = () => cached(`pred-drivers-${YEAR}`, 6 * 3600e3, async () => {
+    const j = await jolpica(`${YEAR}/driverstandings.json?limit=100`);
+    const list = j.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings || [];
+    return list.map(x => ({ code: codeOf(x.Driver), name: `${x.Driver.givenName} ${x.Driver.familyName}`, team: x.Constructors?.[0]?.name || "" }));
+  });
+  const podiumOf = round => cached(`pred-podium-${YEAR}-${round}`, 15 * 60e3, async () => {
+    const j = await jolpica(`${YEAR}/${round}/results.json`);
+    const res = j.MRData?.RaceTable?.Races?.[0]?.Results || [];
+    return res.length >= 3 ? res.slice(0, 3).map(r => codeOf(r.Driver)) : null;
+  });
+  // exact winner = 5, exact P2/P3 = 3, on the podium but wrong place = 1
+  const scorePrediction = (p, podium) => podium ? [p.p1, p.p2, p.p3].reduce((s, c, i) => s + (c === podium[i] ? [5, 3, 3][i] : podium.includes(c) ? 1 : 0), 0) : null;
+  const nextRace = async () => { const now = Date.now(); return (await scheduleOf()).find(r => raceTime(r) > now) || null; };
+
+  app.get("/api/predictions/next", needDb, wrap(async (req, res) => {
+    const race = await nextRace();
+    if (!race) return res.json({ race: null });
+    const me = await userFromReq(req);
+    let mine = null;
+    if (me) { const { rows } = await q(`SELECT p1, p2, p3 FROM predictions WHERE user_id = $1 AND season = $2 AND round = $3`, [me.id, YEAR, Number(race.round)]); mine = rows[0] || null; }
+    res.json({ race: { round: Number(race.round), name: race.raceName, time: new Date(raceTime(race)).toISOString() }, drivers: await driversOf(), mine });
+  }));
+  app.post("/api/predictions", needDb, auth, limit("predict", 30, 600000), wrap(async (req, res) => {
+    const race = await nextRace();
+    if (!race) return res.status(400).json({ error: "Сейчас нет гонок для прогноза." });
+    const picks = [req.body?.p1, req.body?.p2, req.body?.p3].map(v => String(v || ""));
+    const known = (await driversOf()).map(d => d.code);
+    if (!picks.every(c => known.includes(c))) return res.status(400).json({ error: "Выберите трёх пилотов из списка." });
+    if (new Set(picks).size !== 3) return res.status(400).json({ error: "Пилоты должны быть разными." });
+    await q(`INSERT INTO predictions (user_id, season, round, p1, p2, p3) VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (user_id, season, round) DO UPDATE SET p1 = $4, p2 = $5, p3 = $6, updated_at = now()`, [req.user.id, YEAR, Number(race.round), ...picks]);
+    res.json({ ok: true });
+  }));
+  app.get("/api/predictions/leaderboard", needDb, wrap(async (req, res) => {
+    const me = await userFromReq(req);
+    const { rows } = await q(`SELECT p.user_id, p.round, p.p1, p.p2, p.p3, u.username, u.display_name FROM predictions p JOIN users u ON u.id = p.user_id
+      WHERE p.season = $1 AND NOT u.banned`, [YEAR]);
+    const podiums = {};
+    for (const r of [...new Set(rows.map(r => r.round))]) { try { podiums[r] = await podiumOf(r); } catch { podiums[r] = null; } }
+    const by = new Map(), mine = [];
+    const names = Object.fromEntries((await scheduleOf()).map(r => [Number(r.round), r.raceName]));
+    for (const r of rows) {
+      const pts = scorePrediction(r, podiums[r.round]);
+      if (me && r.user_id === me.id) mine.push({ round: r.round, race: names[r.round] || "", picks: [r.p1, r.p2, r.p3], podium: podiums[r.round] || null, points: pts });
+      if (pts === null) continue;
+      const u = by.get(r.user_id) || { username: r.username, displayName: r.display_name, points: 0, races: 0 };
+      u.points += pts; u.races += 1; by.set(r.user_id, u);
+    }
+    const board = [...by.values()].sort((a, b) => b.points - a.points || a.races - b.races).slice(0, 50);
+    res.json({ board, mine: mine.sort((a, b) => b.round - a.round), rules: "Победитель: 5 очков, 2-е и 3-е место: по 3, пилот на подиуме не на своём месте: 1" });
   }));
 
   // ---------- moderation ----------

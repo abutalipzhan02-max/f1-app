@@ -129,7 +129,7 @@ app.get("/api/standings", async (req, res) => {
         season, round: dLists[0]?.round || cLists[0]?.round || null,
         drivers: d.map(x => ({
           position: Number(x.position), points: Number(x.points), wins: Number(x.wins),
-          name: `${x.Driver.givenName} ${x.Driver.familyName}`, code: x.Driver.code || "",
+          id: x.Driver.driverId, name: `${x.Driver.givenName} ${x.Driver.familyName}`, code: x.Driver.code || "",
           number: x.Driver.permanentNumber || "",
           photo: photoByCode.get(x.Driver.code) || photoByNum.get(String(x.Driver.permanentNumber)) || null, team: x.Constructors?.map(t => t.name).join(", ") || ""
         })),
@@ -359,8 +359,57 @@ app.get("/api/track/:key", async (req, res) => {
   }
 });
 
+// ---------- Driver comparison (analytics) ----------
+app.get("/api/compare", async (req, res) => {
+  const season = /^\d{4}$/.test(req.query.season || "") ? req.query.season : String(YEAR);
+  const ids = [req.query.a, req.query.b].map(v => String(v || ""));
+  if (!ids.every(v => /^[a-z0-9_]{2,40}$/.test(v)) || ids[0] === ids[1]) return res.status(400).json({ error: "Выберите двух разных пилотов." });
+  try {
+    const data = await cached(`cmp-${season}-${ids.join("-")}`, 30 * 60 * 1000, async () => {
+      const drivers = [];
+      for (const id of ids) {
+        const [r, qd] = await Promise.all([
+          jolpica(`${season}/drivers/${id}/results.json?limit=100`),
+          jolpica(`${season}/drivers/${id}/qualifying.json?limit=100`).catch(() => null)
+        ]);
+        const quali = {};
+        for (const rc of qd?.MRData?.RaceTable?.Races || []) quali[rc.round] = Number(rc.QualifyingResults?.[0]?.position) || null;
+        const races = r.MRData?.RaceTable?.Races || [];
+        const rounds = races.map(rc => {
+          const x = rc.Results?.[0] || {};
+          return { round: Number(rc.round), race: rc.raceName, pos: Number(x.position) || null, grid: Number(x.grid) || null, quali: quali[rc.round] ?? null,
+            points: Number(x.points) || 0, finished: /^(Finished|\+\d+ Lap)/.test(x.status || ""), team: x.Constructor?.name || "" };
+        });
+        const first = races[0]?.Results?.[0];
+        const classified = rounds.filter(x => x.pos);
+        drivers.push({
+          id, code: first?.Driver?.code || id.slice(0, 3).toUpperCase(), name: first ? `${first.Driver.givenName} ${first.Driver.familyName}` : id,
+          team: rounds.length ? rounds[rounds.length - 1].team : "",
+          stats: {
+            races: rounds.length, points: rounds.reduce((t, x) => t + x.points, 0),
+            wins: rounds.filter(x => x.pos === 1).length, podiums: rounds.filter(x => x.pos && x.pos <= 3).length,
+            poles: rounds.filter(x => x.quali === 1).length, best: classified.length ? Math.min(...classified.map(x => x.pos)) : null,
+            avg: classified.length ? Math.round(classified.reduce((t, x) => t + x.pos, 0) / classified.length * 10) / 10 : null,
+            dnf: rounds.filter(x => !x.finished).length
+          },
+          rounds
+        });
+      }
+      const h2h = [0, 0];
+      for (const x of drivers[0].rounds) {
+        const y = drivers[1].rounds.find(z => z.round === x.round);
+        if (y && x.pos && y.pos && x.pos !== y.pos) h2h[x.pos < y.pos ? 0 : 1]++;
+      }
+      return { season, drivers, h2h, updatedAt: new Date().toISOString() };
+    });
+    res.json(data);
+  } catch (e) {
+    res.status(502).json({ error: "Не удалось загрузить данные для сравнения.", detail: e.message });
+  }
+});
+
 // ---------- Community (accounts, posts, comments, chat history) ----------
-try { community = require("./community")(app, { chat, clean, LINK_RE }); }
+try { community = require("./community")(app, { chat, clean, LINK_RE, jolpica, cached, YEAR, DAY }); }
 catch (e) { console.error("Community disabled:", e.message); }
 app.get("/api/community/status", (_req, res) => res.json(community ? community.status() : { enabled: false, ready: false, telegram: false }));
 

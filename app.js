@@ -2,7 +2,7 @@ const WATCH_URL="https://m.vkvideo.ru/@formula_one_f1";
 const watchLink=`<a class="watch" href="${WATCH_URL}" target="_blank" rel="noopener">▶ Смотреть на VK Видео</a>`;
 const $ = (s, root=document) => root.querySelector(s);
 const content = $("#content");
-let tab = "schedule", standingsTab = "drivers", selectedSession = null, currentSessions = [];
+let tab = "home", standingsTab = "drivers", selectedSession = null, currentSessions = [];
 const cache = new Map();
 const api = async (path, ttl=0) => {
   const old=cache.get(path);
@@ -41,12 +41,60 @@ async function renderSchedule(){
     loadTracks();
   }catch(e){content.innerHTML=title("Расписание","Данные загружаются с серверов")+errorBox(e);}
 }
+const standTabs=()=>`<div class="tabs">${[["drivers","Пилоты"],["teams","Команды"],["compare","Сравнение"]].map(([k,l])=>`<button data-stand="${k}" class="${standingsTab===k?"active":""}">${l}</button>`).join("")}</div>`;
+let cmp={season:"",a:"",b:""};
+const safeColor=c=>lum(c)>.8?"#8a8a96":c;
+function lineChart(rounds,sa,sb,ca,cb){
+  const W=340,H=180,P=28,n=rounds.length,max=Math.max(...sa,...sb,1);
+  const x=i=>P+(n>1?i*(W-2*P)/(n-1):0), y=v=>H-P-(v/max)*(H-2*P);
+  const path=arr=>arr.map((v,i)=>`${i?"L":"M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join("");
+  const grid=[0,.5,1].map(f=>`<line x1="${P}" x2="${W-P/2}" y1="${y(max*f)}" y2="${y(max*f)}" stroke="currentColor" stroke-opacity=".12"/><text x="${P-4}" y="${y(max*f)+4}" text-anchor="end" font-size="10" fill="currentColor" fill-opacity=".6">${Math.round(max*f)}</text>`).join("");
+  const lab=rounds.length?`<text x="${x(0)}" y="${H-8}" text-anchor="middle" font-size="10" fill="currentColor" fill-opacity=".6">${rounds[0]}</text><text x="${x(n-1)}" y="${H-8}" text-anchor="middle" font-size="10" fill="currentColor" fill-opacity=".6">${rounds[n-1]}</text>`:"";
+  return `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="Очки по этапам">${grid}${lab}<path d="${path(sa)}" fill="none" stroke="${ca}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/><path d="${path(sb)}" fill="none" stroke="${cb}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+function cmpRow(label,va,vb,ca,cb,{low=false,bars=true}={}){
+  const na=va===null||va===undefined?null:Number(va), nb=vb===null||vb===undefined?null:Number(vb);
+  const better=na===null||nb===null||na===nb?0:(low?(na<nb?-1:1):(na>nb?-1:1));
+  const max=Math.max(na||0,nb||0)||1;
+  return `<div class="cmp-row"><b class="${better===-1?"win":""}">${na===null?"—":va}</b><span class="cmp-label">${label}</span><b class="${better===1?"win":""}">${nb===null?"—":vb}</b>${bars?`<div class="cmp-bars"><div class="half l"><i style="width:${(na||0)/max*100}%;background:${ca}"></i></div><div class="half"><i style="width:${(nb||0)/max*100}%;background:${cb}"></i></div></div>`:""}</div>`;
+}
+async function renderCompare(){
+  const head=title("Чемпионат","Сравнение двух пилотов");
+  content.innerHTML=head+standTabs()+`<div class="loading">Загружаем пилотов…</div>`;
+  try{
+    const seasons=[...Array(4)].map((_,i)=>String(new Date().getFullYear()-i));
+    if(!cmp.season)cmp.season=seasons[0];
+    const st=await api(`/api/standings?season=${cmp.season}`,600000);
+    const ds=st.drivers;
+    if(!ds.length){content.innerHTML=head+standTabs()+`<section class="card pad"><div class="empty">Для сезона ${esc(cmp.season)} нет данных о пилотах.</div></section>`;return;}
+    if(!ds.some(d=>d.id===cmp.a))cmp.a=ds[0].id;
+    if(!ds.some(d=>d.id===cmp.b)||cmp.b===cmp.a)cmp.b=(ds.find(d=>d.id!==cmp.a)||ds[0]).id;
+    const opt=sel=>ds.map(d=>`<option value="${esc(d.id)}"${d.id===sel?" selected":""}>${esc(d.code||"")} · ${esc(d.name)}</option>`).join("");
+    const pickers=`<section class="card pad"><div class="form"><select id="cmpSeason" class="select">${seasons.map(s=>`<option value="${s}"${s===cmp.season?" selected":""}>Сезон ${s}</option>`).join("")}</select><select id="cmpA" class="select">${opt(cmp.a)}</select><select id="cmpB" class="select">${opt(cmp.b)}</select></div></section>`;
+    content.innerHTML=head+standTabs()+pickers+`<div id="cmpOut"><div class="loading">Считаем…</div></div>`;
+    const d=await api(`/api/compare?season=${cmp.season}&a=${cmp.a}&b=${cmp.b}`,600000);
+    const [A,B]=d.drivers, pa=ds.find(x=>x.id===A.id), pb=ds.find(x=>x.id===B.id);
+    const ca=safeColor(teamColor(A.team)); let cb=safeColor(teamColor(B.team)); if(cb===ca)cb="#8a8a96";
+    const rounds=[...new Set([...A.rounds,...B.rounds].map(r=>r.round))].sort((x,y)=>x-y);
+    const cum=D=>{let t=0;return rounds.map(r=>{t+=(D.rounds.find(x=>x.round===r)||{points:0}).points;return t;});};
+    const sa=cum(A), sb=cum(B);
+    const side=(D,p,c)=>`<div class="cmp-who" style="--tc:${c}">${avatar(p?.photo,D.name)}<b>${esc(D.name)}</b><span class="small">${esc(D.team)}</span></div>`;
+    let html=`<section class="card pad"><div class="cmp-head">${side(A,pa,ca)}<span class="vs">VS</span>${side(B,pb,cb)}</div>`;
+    html+=cmpRow("Очки",A.stats.points,B.stats.points,ca,cb)+cmpRow("Победы",A.stats.wins,B.stats.wins,ca,cb)+cmpRow("Подиумы",A.stats.podiums,B.stats.podiums,ca,cb)+cmpRow("Поул-позиции",A.stats.poles,B.stats.poles,ca,cb)
+      +cmpRow("Лучший финиш",A.stats.best,B.stats.best,ca,cb,{low:true,bars:false})+cmpRow("Средний финиш",A.stats.avg,B.stats.avg,ca,cb,{low:true,bars:false})+cmpRow("Сходы",A.stats.dnf,B.stats.dnf,ca,cb,{low:true,bars:false})
+      +cmpRow("Личные встречи",d.h2h[0],d.h2h[1],ca,cb)+`</section>`;
+    html+=card("Очки по этапам",`<div class="pad">${rounds.length?lineChart(rounds,sa,sb,ca,cb):'<div class="empty">Нет результатов гонок за этот сезон.</div>'}<div class="legend"><span><i style="background:${ca}"></i>${esc(A.code)}</span><span><i style="background:${cb}"></i>${esc(B.code)}</span></div></div>`);
+    html+=`<p class="source">Данные: Jolpica F1 (результаты гонок и квалификаций). «Личные встречи» — кто финишировал выше в гонках, где оба получили классификацию.</p>`;
+    $("#cmpOut").innerHTML=html;
+  }catch(e){const o=$("#cmpOut");if(o)o.innerHTML=errorBox(e);else content.innerHTML=head+standTabs()+errorBox(e);}
+}
 async function renderStandings(){
+  if(standingsTab==="compare")return renderCompare();
   content.innerHTML=title("Чемпионат","Очки и позиции из базы Jolpica F1")+`<div class="loading">Загружаем таблицу…</div>`;
   try{
     const d=await api("/api/standings",300000);
     const rows=standingsTab==="drivers"?d.drivers:d.constructors;
-    let html=`<div class="tabs"><button data-stand="drivers" class="${standingsTab==="drivers"?"active":""}">Пилоты</button><button data-stand="teams" class="${standingsTab==="teams"?"active":""}">Команды</button></div>`;
+    let html=standTabs();
     html+=card(standingsTab==="drivers"?"Личный зачёт":"Кубок конструкторов",rows.length?rows.map(x=>`<div class="item tc has-av" style="--tc:${teamColor(standingsTab==="drivers"?x.team:x.name)}"><span class="rank">${x.position}</span>${standingsTab==="drivers"?avatar(x.photo,x.name):badge(x.name)}<div><div class="item-title">${esc(x.name)}</div><div class="item-sub">${esc(x.team||x.nationality||"")} ${x.wins?`· ${x.wins} побед`:""}</div></div><span class="points">${x.points}</span></div>`).join(""):`<div class="empty">Официальные очки за этот сезон пока не опубликованы.</div>`);
     content.innerHTML=title("Чемпионат",`Сезон ${d.season}${d.round?` · после этапа ${d.round}`:""} · Jolpica F1`)+html+`<p class="source">Если сезон ещё не начался или источник не содержит результатов, таблица будет пустой — приложение не подставляет вымышленные очки.</p>`;
   }catch(e){content.innerHTML=title("Чемпионат","Результаты сезона")+errorBox(e);}
@@ -59,26 +107,67 @@ async function renderLive(){
     const options=currentSessions.slice(0,80);
     if(!options.length) throw new Error("OpenF1 пока не вернул сессии для этого сезона.");
     content.innerHTML=title("Live / архив","Бесплатный исторический тайминг OpenF1")+
-      `<section class="card pad"><span class="pill">АРХИВ · FREE</span><p class="small">Выбери сессию, чтобы посмотреть классификацию, позиции, шины, круги и погоду, если эти данные доступны.</p>${watchLink}<select class="select" id="sessionSelect" style="width:100%">${options.map((s,i)=>`<option value="${s.session_key}" ${i===0?"selected":""}>${esc(s.country_name)} · ${esc(s.session_name)} · ${date(s.date_start)}</option>`).join("")}</select><button class="year" id="openSession" style="width:100%;margin-top:10px">Открыть сессию</button></section><div id="sessionData"></div>`;
+      `<section class="card pad"><span class="pill">АРХИВ · FREE</span><p class="small">Выберите сессию: тайминг (отставание, интервалы, лучшие круги), шины, стратегия, погода и Race Control. Данные появляются после завершения сессии.</p>${watchLink}<select class="select" id="sessionSelect" style="width:100%">${options.map((s,i)=>`<option value="${s.session_key}" ${i===0?"selected":""}>${esc(s.country_name)} · ${esc(s.session_name)} · ${date(s.date_start)}</option>`).join("")}</select><button class="year" id="openSession" style="width:100%;margin-top:10px">Открыть сессию</button></section><div id="sessionData"></div>`;
     selectedSession=String(options[0].session_key); await loadSession(selectedSession);
     $("#openSession").onclick=()=>{selectedSession=$("#sessionSelect").value;loadSession(selectedSession);};
   }catch(e){content.innerHTML=title("Live / архив","Исторические данные")+errorBox(e);}
+}
+const lapFmt=s=>{if(s==null||isNaN(s))return "—";const m=Math.floor(s/60);return m?`${m}:${(s-m*60).toFixed(3).padStart(6,"0")}`:Number(s).toFixed(3);};
+const TYRE={SOFT:["S","#e10600"],MEDIUM:["M","#ffd23f"],HARD:["H","#e8e8ee"],INTERMEDIATE:["I","#2ecc71"],WET:["W","#3b82f6"]};
+const tyreBadge=c=>{const t=TYRE[String(c||"").toUpperCase()];return t?`<i class="tyre" style="--tc:${t[1]}">${t[0]}</i>`:`<i class="tyre none">–</i>`;};
+let timing={data:null,team:"",sort:"pos",mode:"gap",q:""};
+function buildTiming(d){
+  const lastOf=v=>Array.isArray(v)?[...v].reverse().find(x=>x!=null):v;
+  const drivers=new Map(d.drivers.map(x=>[x.driver_number,x]));
+  const resMap=new Map(d.results.map(x=>[x.driver_number,x]));
+  const latest=new Map();
+  for(const p of d.positions){const o=latest.get(p.driver_number);if(!o||new Date(p.date)>new Date(o.date))latest.set(p.driver_number,p);}
+  let order=[...latest.values()].sort((x,y)=>x.position-y.position).map(p=>({n:p.driver_number,pos:p.position}));
+  if(!order.length)order=[...d.results].filter(r=>r.position).sort((x,y)=>x.position-y.position).map(r=>({n:r.driver_number,pos:r.position}));
+  const group=(arr,key)=>{const m=new Map();for(const x of arr){if(!m.has(x[key]))m.set(x[key],[]);m.get(x[key]).push(x);}return m;};
+  const lapsBy=group(d.laps,"driver_number"), stintsBy=group(d.stints,"driver_number");
+  let sessionBest=Infinity;
+  for(const l of d.laps)if(l.lap_duration>0&&l.lap_duration<sessionBest)sessionBest=l.lap_duration;
+  const rows=order.map(({n,pos})=>{
+    const dr=drivers.get(n)||{}, rr=resMap.get(n)||{};
+    const L=(lapsBy.get(n)||[]).filter(l=>l.lap_duration>0).sort((x,y)=>x.lap_number-y.lap_number);
+    const best=L.length?Math.min(...L.map(l=>l.lap_duration)):null, last=L.length?L[L.length-1].lap_duration:null;
+    const lastLap=(lapsBy.get(n)||[]).reduce((m,l)=>Math.max(m,l.lap_number||0),0);
+    const stints=(stintsBy.get(n)||[]).sort((x,y)=>x.stint_number-y.stint_number).map(s=>({compound:s.compound,start:s.lap_start||1,end:s.lap_end||lastLap||s.lap_start||1}));
+    const gap=lastOf(rr.gap_to_leader);
+    return {n,pos,code:dr.name_acronym||("№"+n),name:dr.full_name||dr.name_acronym||("№"+n),team:dr.team_name||"",color:dr.team_colour?"#"+dr.team_colour:"#3a3a46",photo:dr.headshot_url,
+      best,last,isSB:best!==null&&best===sessionBest,lastPB:last!==null&&last===best,stints,pits:Math.max(0,stints.length-1),tyre:stints.length?stints[stints.length-1].compound:null,dnf:!!rr.dnf,dns:!!rr.dns,gap,lastLap};
+  });
+  rows.forEach((r,i)=>{
+    const g=typeof r.gap==="number"?r.gap:null, pg=i>0&&typeof rows[i-1].gap==="number"?rows[i-1].gap:(i===1?0:null);
+    r.gapText=r.pos===1?"Лидер":r.dnf?"DNF":r.dns?"DNS":g!==null?`+${g.toFixed(3)}`:typeof r.gap==="string"?r.gap:"—";
+    r.intText=r.pos===1?"Лидер":r.dnf?"DNF":(g!==null&&pg!==null)?`+${(g-pg).toFixed(3)}`:r.gapText;
+  });
+  return {rows,totalLaps:Math.max(0,...rows.map(r=>r.lastLap)),sessionBest:sessionBest===Infinity?null:sessionBest,partial:d.partial};
+}
+function drawTiming(){
+  const T=timing.data, body=$("#tmBody"), strat=$("#tmStrategy"); if(!T||!body)return;
+  let rows=T.rows.filter(r=>(!timing.team||r.team===timing.team)&&(!timing.q||(r.code+" "+r.name).toLowerCase().includes(timing.q.toLowerCase())));
+  if(timing.sort==="best")rows=[...rows].sort((x,y)=>(x.best??1e9)-(y.best??1e9));
+  if(timing.sort==="last")rows=[...rows].sort((x,y)=>(x.last??1e9)-(y.last??1e9));
+  const head=`<div class="tm-row tm-head"><span>№</span><span>Пилот</span><button class="tm-mode" data-tmmode>${timing.mode==="gap"?"Отставание":"Интервал"} ⇄</button><span>Круг</span><span>Лучший</span><span>Шины</span></div>`;
+  body.innerHTML=card("Тайминг",rows.length?head+rows.map(r=>`<div class="tm-row tc" style="--tc:${r.color}"><span class="rank">${r.pos}</span><span class="tm-drv"><b>${esc(r.code)}</b><small>${esc(r.team)}</small></span><span class="tm-gap">${timing.mode==="gap"?r.gapText:r.intText}</span><span class="tm-t${r.lastPB?" pb":""}">${lapFmt(r.last)}</span><span class="tm-t${r.isSB?" sb":""}">${lapFmt(r.best)}</span><span class="tm-tyre">${tyreBadge(r.tyre)}<small>${r.pits} ост.</small></span></div>`).join("")+`<div class="tm-legend"><span class="sb">■</span> лучший круг сессии <span class="pb">■</span> личный лучший</div>`:`<div class="empty">Нет пилотов по этому фильтру.</div>`);
+  const withStints=T.rows.filter(r=>r.stints.length);
+  strat.innerHTML=withStints.length?card("Стратегия шин",`<div class="pad strat">${withStints.map(r=>`<div class="strat-row"><b>${esc(r.code)}</b><div class="strat-bar">${r.stints.map(s=>{const len=Math.max(1,s.end-s.start+1),t=TYRE[String(s.compound||"").toUpperCase()]||["?","#777"];return `<i style="flex:${len};background:${t[1]}" title="${esc(s.compound||"")} · круги ${s.start}–${s.end}">${len>=6?t[0]:""}</i>`;}).join("")}</div></div>`).join("")}<div class="small">Длина сегмента — число кругов на комплекте. Данные о шинах публикуются не для всех сессий.</div></div>`):"";
 }
 async function loadSession(key){
   const target=$("#sessionData"); if(!target)return; target.innerHTML='<div class="loading">Загружаем данные сессии…</div>';
   try{
     const d=await api(`/api/session/${key}`,30000);
-    const drivers=new Map(d.drivers.map(x=>[x.driver_number,x]));
-    const latest=new Map();
-    for(const p of d.positions){const old=latest.get(p.driver_number);if(!old||new Date(p.date)>new Date(old.date))latest.set(p.driver_number,p);}
-    const resultMap=new Map(d.results.map(x=>[x.driver_number,x]));
-    const order=[...latest.values()].sort((a,b)=>a.position-b.position);
-    const classification=order.length?order.map(p=>{const dr=drivers.get(p.driver_number)||{};const rr=resultMap.get(p.driver_number)||{};return `<div class="item tc has-av" style="--tc:${dr.team_colour?"#"+esc(dr.team_colour):"#3a3a46"}"><span class="rank">${p.position}</span>${avatar(dr.headshot_url,dr.full_name||dr.name_acronym||("№"+p.driver_number))}<div><div class="item-title">${esc(dr.name_acronym||dr.full_name||("№"+p.driver_number))}</div><div class="item-sub">${esc(dr.team_name||"")}</div></div><span class="points">${rr.gap_to_leader===0?"P1":rr.gap_to_leader!=null?`+${rr.gap_to_leader}s`:"—"}</span></div>`;}).join(""):"<div class='empty'>Позиции для этой сессии не опубликованы.</div>";
+    timing={data:buildTiming(d),team:"",sort:"pos",mode:"gap",q:""};
+    const teams=[...new Set(timing.data.rows.map(r=>r.team).filter(Boolean))];
     const w=d.weather;
-    target.innerHTML=card("Классификация",classification)+
-      (w?`<div class="grid2"><div class="stat"><strong>${w.air_temperature??"—"}°</strong><span>Температура воздуха</span></div><div class="stat"><strong>${w.track_temperature??"—"}°</strong><span>Температура трассы</span></div><div class="stat"><strong>${w.humidity??"—"}%</strong><span>Влажность</span></div><div class="stat"><strong>${w.rainfall?"Да":"Нет"}</strong><span>Дождь</span></div></div>`:"")+
-      card("Race Control",d.raceControl.length?d.raceControl.map(x=>`<div class="session"><b>${esc(x.category||"Сообщение")} · ${esc(x.flag||"")}</b><span class="small">${esc(x.message||"")}</span></div>`).join(""):"<div class='pad muted'>Сообщения Race Control не найдены.</div>")+
-      `<p class="source">Это архивная сессия, а не прямой эфир. Временные ряды позиций могут содержать только последние доступные обновления. Источник: OpenF1.</p>`;
+    target.innerHTML=`<section class="card pad"><div class="filters"><select id="tmTeam" class="select"><option value="">Все команды</option>${teams.map(t=>`<option>${esc(t)}</option>`).join("")}</select><select id="tmSort" class="select"><option value="pos">По позиции</option><option value="best">По лучшему кругу</option><option value="last">По последнему кругу</option></select></div><input id="tmQ" class="field" placeholder="Поиск пилота (код или имя)" style="margin-top:10px"></section>`
+      +`<div id="tmBody"></div><div id="tmStrategy"></div>`
+      +(w?`<div class="grid2"><div class="stat"><strong>${w.air_temperature??"—"}°</strong><span>Температура воздуха</span></div><div class="stat"><strong>${w.track_temperature??"—"}°</strong><span>Температура трассы</span></div><div class="stat"><strong>${w.humidity??"—"}%</strong><span>Влажность</span></div><div class="stat"><strong>${w.rainfall?"Да":"Нет"}</strong><span>Дождь</span></div></div>`:"")
+      +card("Race Control",d.raceControl.length?d.raceControl.map(x=>`<div class="session"><b>${esc(x.category||"Сообщение")} · ${esc(x.flag||"")}</b><span class="small">${esc(x.message||"")}</span></div>`).join(""):"<div class='pad muted'>Сообщения Race Control не найдены.</div>")
+      +`<p class="source">Это архивная сессия, а не прямой эфир: данные OpenF1 доступны после завершения сессии.${timing.data.partial?" Часть наборов данных не загрузилась, таблица может быть неполной.":""}</p>`;
+    drawTiming();
   }catch(e){target.innerHTML=errorBox(e);}
 }
 let trackChain=Promise.resolve();
@@ -175,7 +264,7 @@ async function renderChat(){
 }
 // ---------- Community: feed, profiles, accounts ----------
 const host=()=>$("#commBody")||content;
-let commTab="feed", feedTeam="", tgTried=false, authMode="login", feedPosts=[], feedMore=false, feedMod=false;
+let commTab="feed", feedTeam="", feedScope="", viewUser="", tgTried=false, authMode="login", feedPosts=[], feedMore=false, feedMod=false;
 const auth={token:null,user:null};
 try{auth.token=localStorage.getItem("f1token");}catch{}
 const hasTg=()=>!!window.Telegram?.WebApp?.initData;
@@ -203,7 +292,7 @@ async function tryTelegramLogin(){
   try{setAuth(await authFetch("/api/auth/telegram",{method:"POST",body:{initData:Telegram.WebApp.initData}}));return true;}catch{return false;}
 }
 async function renderCommunity(){
-  const tabs=[["feed","Лента"],["chat","Чат"],["me","Профиль"]].map(([k,l])=>`<button data-comm="${k}" class="${commTab===k?"active":""}">${l}</button>`).join("");
+  const tabs=[["feed","Лента"],["predict","Прогнозы"],["chat","Чат"]].map(([k,l])=>`<button data-comm="${k}" class="${commTab===k?"active":""}">${l}</button>`).join("");
   content.innerHTML=title("Сообщество","Лента, чат и профили болельщиков")+`<div class="tabs">${tabs}</div><div id="commBody"><div class="loading">Загружаем…</div></div>`;
   if(commTab!=="chat"&&chatES){chatES.close();chatES=null;}
   let st={enabled:false,ready:false};
@@ -211,24 +300,55 @@ async function renderCommunity(){
   if(st.enabled&&st.ready){await loadMe();if(!auth.user&&!tgTried){tgTried=true;await tryTelegramLogin();}}
   if(commTab==="chat")return renderChat();
   if(!st.enabled||!st.ready){host().innerHTML=`<section class="card pad"><b>Лента и профили пока недоступны</b><p class="small">Для них нужна база данных на сервере (${st.enabled?"она ещё подключается, попробуйте через минуту":"не подключена"}). Чат при этом работает.</p><button class="year" data-comm="chat">Открыть чат</button></section>`;return;}
-  return commTab==="me"?renderProfile():renderFeed();
+  if(commTab==="predict")return renderPredict();
+  if(commTab==="user")return renderUserProfile();
+  return renderFeed();
 }
 const teamOptions=sel=>TEAMS.map(t=>`<option value="${t.id}"${t.id===sel?" selected":""}>${esc(t.name)}</option>`).join("");
 const composerHtml=()=>auth.user
   ?`<section class="card composer"><textarea id="postText" class="field" maxlength="1000" rows="3" placeholder="Что думаете о последней гонке?"></textarea><div class="composer-row"><select id="postTeam" class="select"><option value="">Без тега</option>${teamOptions("")}</select><button class="year" data-act="post">Опубликовать</button></div><div class="small err" id="postErr"></div></section>`
   :`<section class="card pad"><b>Войдите, чтобы публиковать и комментировать</b><p class="small">Читать ленту можно без аккаунта.</p><button class="year" data-comm="me">Войти / регистрация</button></section>`;
-const postHtml=p=>`<article class="card post" data-post="${p.id}"><div class="post-head">${uav(p.displayName,p.favTeam)}<div class="post-who"><b>${esc(p.displayName)}</b><span class="small">@${esc(p.username)} · ${ago(p.createdAt)}</span></div>${p.team?`<span class="pill">${esc(teamById(p.team)?.name||"")}</span>`:""}</div><div class="post-text">${esc(p.text)}</div><div class="post-actions"><button data-act="like" class="${p.liked?"on":""}">♥ ${p.likes}</button><button data-act="comments">💬 ${p.comments}</button><button data-act="report" aria-label="Пожаловаться">⚑</button>${p.mine||feedMod?`<button data-act="del" aria-label="Удалить">🗑</button>`:""}</div><div class="comments" hidden></div></article>`;
+const postHtml=p=>`<article class="card post" data-post="${p.id}"><div class="post-head">${uav(p.displayName,p.favTeam)}<div class="post-who" data-user="${esc(p.username)}"><b>${esc(p.displayName)}</b><span class="small">@${esc(p.username)} · ${ago(p.createdAt)}</span></div>${p.team?`<span class="pill">${esc(teamById(p.team)?.name||"")}</span>`:""}</div><div class="post-text">${esc(p.text)}</div><div class="post-actions"><button data-act="like" class="${p.liked?"on":""}">♥ ${p.likes}</button><button data-act="comments">💬 ${p.comments}</button><button data-act="report" aria-label="Пожаловаться">⚑</button>${p.mine||feedMod?`<button data-act="del" aria-label="Удалить">🗑</button>`:""}</div><div class="comments" hidden></div></article>`;
 function drawFeed(){
   const el=$("#feedList"); if(!el)return;
-  el.innerHTML=feedPosts.length?feedPosts.map(postHtml).join("")+(feedMore?`<button class="year more" data-act="more">Показать ещё</button>`:""):`<div class="empty">Пока нет публикаций. Станьте первым!</div>`;
+  el.innerHTML=feedPosts.length?feedPosts.map(postHtml).join("")+(feedMore?`<button class="year more" data-act="more">Показать ещё</button>`:""):`<div class="empty">${feedScope==="following"?"В подписках пока нет публикаций. Откройте профиль автора и нажмите «Подписаться».":"Пока нет публикаций. Станьте первым!"}</div>`;
 }
 async function renderFeed(append){
-  if(!append){host().innerHTML=composerHtml()+`<select id="feedTeam" class="select"><option value="">Все команды</option>${teamOptions(feedTeam)}</select><div id="feedList"><div class="loading">Загружаем ленту…</div></div>`;feedPosts=[];}
+  if(!append){host().innerHTML=composerHtml()+`<div class="filters"><select id="feedScope" class="select"><option value="">Все публикации</option><option value="following"${feedScope==="following"?" selected":""}>Мои подписки</option></select><select id="feedTeam" class="select"><option value="">Все команды</option>${teamOptions(feedTeam)}</select></div><div id="feedList"><div class="loading">Загружаем ленту…</div></div>`;feedPosts=[];}
   try{
     const last=append&&feedPosts.length?feedPosts[feedPosts.length-1].id:"";
-    const d=await authFetch(`/api/posts?${feedTeam?`team=${feedTeam}&`:""}${last?`before=${last}`:""}`);
+    const d=await authFetch(`/api/posts?${feedTeam?`team=${feedTeam}&`:""}${feedScope?`scope=${feedScope}&`:""}${last?`before=${last}`:""}`);
     feedMod=d.canModerate; feedPosts=feedPosts.concat(d.posts); feedMore=d.posts.length===20; drawFeed();
   }catch(e){const el=$("#feedList");if(el)el.innerHTML=errorBox(e);}
+}
+const statsHtml=d=>`<div class="stats3"><div><b>${d.stats.posts}</b><span>постов</span></div><div><b>${d.followers}</b><span>подписчиков</span></div><div><b>${d.following}</b><span>подписок</span></div></div>`;
+const levelHtml=d=>`<div class="level"><div class="level-top"><b>Уровень ${d.level}</b><span class="small">${d.xp} XP · до следующего ${100-d.xp%100}</span></div><div class="xpbar"><i style="width:${d.xp%100}%"></i></div></div>`;
+const achHtml=d=>card(`Достижения (${d.achievements.filter(x=>x.earned).length}/${d.achievements.length})`,`<div class="ach-grid">${d.achievements.map(x=>`<div class="ach${x.earned?" on":""}"><span class="ach-ic">${x.icon}</span><b>${esc(x.title)}</b><span class="small">${esc(x.desc)}</span></div>`).join("")}</div>`);
+async function renderUserProfile(){
+  host().innerHTML='<div class="loading">Загружаем профиль…</div>';
+  try{
+    const d=await authFetch(`/api/users/${encodeURIComponent(viewUser)}`); feedMod=false;
+    const u=d.user, fav=teamById(u.favTeam);
+    host().innerHTML=`<button class="back" data-comm="feed">← К ленте</button><section class="card pad profile"><div class="profile-top">${uav(u.displayName,u.favTeam,true)}<div><div class="item-title">${esc(u.displayName)}</div><div class="small">@${esc(u.username)}${fav?` · ${esc(fav.name)}`:""}</div></div></div>${u.bio?`<p class="post-text">${esc(u.bio)}</p>`:""}${statsHtml(d)}${levelHtml(d)}${d.isMe?"":`<button class="year" data-act="follow" data-user-name="${esc(u.username)}">${d.isFollowing?"Вы подписаны":"Подписаться"}</button>`}</section>${achHtml(d)}<h2 class="sec">Публикации</h2>${d.posts.length?d.posts.map(postHtml).join(""):"<div class='empty'>Пока нет публикаций.</div>"}`;
+  }catch(e){host().innerHTML=errorBox(e);}
+}
+async function renderPredict(){
+  host().innerHTML='<div class="loading">Загружаем прогнозы…</div>';
+  try{
+    const [n,lb]=await Promise.all([authFetch("/api/predictions/next"),authFetch("/api/predictions/leaderboard")]);
+    let html="";
+    if(!n.race){html+=`<section class="card pad"><b>Сезон завершён</b><p class="small">Новые прогнозы появятся в следующем сезоне.</p></section>`;}
+    else{
+      const opts=sel=>`<option value="">— выберите —</option>`+n.drivers.map(d=>`<option value="${esc(d.code)}"${d.code===sel?" selected":""}>${esc(d.code)} · ${esc(d.name)}</option>`).join("");
+      html+=`<section class="card pad"><div class="round">Раунд ${n.race.round}</div><div class="race-title pred-title">${esc(n.race.name)}</div><div class="small">Прогноз принимается до старта гонки: ${date(n.race.time)}</div>`
+        +(auth.user?`<div class="form"><label class="small">1 место (5 очков)</label><select id="pr1" class="select">${opts(n.mine?.p1)}</select><label class="small">2 место (3 очка)</label><select id="pr2" class="select">${opts(n.mine?.p2)}</select><label class="small">3 место (3 очка)</label><select id="pr3" class="select">${opts(n.mine?.p3)}</select><button class="year" data-act="predsave">${n.mine?"Обновить прогноз":"Сохранить прогноз"}</button><div class="small" id="prMsg">${n.mine?"Ваш прогноз сохранён, его можно менять до старта.":""}</div></div>`
+          :`<p><b>Войдите, чтобы сделать прогноз.</b></p><button class="year" data-comm="me">Войти / регистрация</button>`)
+        +`<p class="small">Очки: победитель — 5, 2-е и 3-е места — по 3, пилот на подиуме не на своём месте — 1.</p></section>`;
+    }
+    html+=card("Рейтинг болельщиков",lb.board.length?lb.board.map((u,i)=>`<div class="item${auth.user&&u.username===auth.user.username?" me":""}"><span class="rank">${i+1}</span><div><div class="item-title">${esc(u.displayName)}</div><div class="item-sub">@${esc(u.username)} · гонок: ${u.races}</div></div><span class="points">${u.points}</span></div>`).join(""):`<div class="empty">Очки появятся после первой гонки, на которую сделали прогноз.</div>`);
+    if(auth.user&&lb.mine.length)html+=card("Мои прогнозы",lb.mine.map(m=>`<div class="session"><b>${esc(m.race||("Раунд "+m.round))}</b><time>Мой прогноз: ${m.picks.map(esc).join(" · ")}${m.podium?` · Итог: ${m.podium.map(esc).join(" · ")} · очки: ${m.points}`:" · ждём результат гонки"}</time></div>`).join(""));
+    host().innerHTML=html;
+  }catch(e){host().innerHTML=errorBox(e);}
 }
 async function loadComments(id,box){
   box.innerHTML='<div class="small">Загружаем…</div>';
@@ -244,6 +364,7 @@ async function renderProfile(){
   try{
     const u=auth.user, d=await authFetch(`/api/users/${u.username}`); feedMod=false;
     let html=`<section class="card pad profile"><div class="profile-top">${uav(u.displayName,u.favTeam,true)}<div><div class="item-title">${esc(u.displayName)}</div><div class="small">@${esc(u.username)}${u.role!=="user"?` · <span class="pill">${esc(u.role)}</span>`:""}</div></div></div><div class="form"><label class="small">Имя</label><input id="pfName" class="field" maxlength="30" value="${esc(u.displayName)}"><label class="small">О себе</label><textarea id="pfBio" class="field" maxlength="160" rows="2">${esc(u.bio)}</textarea><label class="small">Любимая команда</label><select id="pfTeam" class="select"><option value="">Не выбрана</option>${teamOptions(u.favTeam)}</select><div class="composer-row"><button class="year" data-act="saveProfile">Сохранить</button><button class="year" data-act="logout">Выйти</button></div><div class="small" id="pfMsg"></div></div></section>`;
+    html+=`<section class="card pad">${statsHtml(d)}${levelHtml(d)}</section>${achHtml(d)}`;
     if(["admin","moderator"].includes(u.role)){
       try{const r=await authFetch("/api/admin/reports");html+=card("Жалобы",r.reports.length?r.reports.map(x=>`<div class="session"><b>@${esc(x.author)}: ${esc(x.text.slice(0,120))}</b><time>Причина: ${esc(x.reason)} · от @${esc(x.reporter)}</time><div class="composer-row"><button class="year" data-act="repdel" data-rid="${x.id}">Удалить пост</button><button class="year" data-act="repkeep" data-rid="${x.id}">Оставить</button></div></div>`).join(""):"<div class='empty'>Новых жалоб нет.</div>");}catch{}
     }
@@ -258,32 +379,51 @@ async function submitPost(){
     $("#postText").value="";err.textContent="";feedPosts.unshift(r.post);drawFeed();
   }catch(e){err.textContent=e.message;}
 }
-content.addEventListener("change",e=>{if(e.target.id==="feedTeam"){feedTeam=e.target.value;renderFeed();}});
+content.addEventListener("change",e=>{
+  if(e.target.id==="tmTeam"){timing.team=e.target.value;drawTiming();return;}
+  if(e.target.id==="tmSort"){timing.sort=e.target.value;drawTiming();return;}
+  if(e.target.id==="feedScope"){feedScope=e.target.value;if(feedScope&&!auth.user){feedScope="";toast("Войдите, чтобы видеть подписки.");}renderFeed();return;}
+  if(e.target.id==="cmpSeason"){cmp.season=e.target.value;cmp.a="";cmp.b="";renderCompare();return;}
+  if(e.target.id==="cmpA"){cmp.a=e.target.value;renderCompare();return;}
+  if(e.target.id==="cmpB"){cmp.b=e.target.value;renderCompare();return;}if(e.target.id==="feedTeam"){feedTeam=e.target.value;renderFeed();}});
+content.addEventListener("input",e=>{if(e.target.id==="tmQ"){timing.q=e.target.value;drawTiming();}});
 content.addEventListener("click",async e=>{
-  const c=e.target.closest("[data-comm]");if(c){commTab=c.dataset.comm;renderCommunity();return;}
+  if(e.target.closest("[data-tmmode]")){timing.mode=timing.mode==="gap"?"int":"gap";drawTiming();return;}
+  const pr=e.target.closest("[data-predict]");if(pr){commTab="predict";goTab("community");return;}
+  const tg=e.target.closest("[data-tab-go]");if(tg){goTab(tg.dataset.tabGo);return;}
+  const g=e.target.closest("[data-go]");if(g){goTab(g.dataset.go);return;}
+  const dd=e.target.closest("[data-do]");if(dd){doAction(dd.dataset.do);return;}
+  const c=e.target.closest("[data-comm]");if(c){if(c.dataset.comm==="me"){goTab("profile");return;}commTab=c.dataset.comm;renderCommunity();return;}
   const m=e.target.closest("[data-auth]");if(m){authMode=m.dataset.auth;renderProfile();return;}
+  const usr=e.target.closest("[data-user]");if(usr){viewUser=usr.dataset.user;commTab="user";goTab("community");return;}
   const btn=e.target.closest("[data-act]");if(!btn)return;
   const a=btn.dataset.act, postEl=btn.closest(".post"), id=postEl?.dataset.post;
   const sure=(label,ms=3000)=>{if(btn.dataset.sure==="1")return true;const old=btn.textContent;btn.dataset.sure="1";btn.textContent=label;setTimeout(()=>{btn.dataset.sure="";btn.textContent=old;},ms);return false;};
   try{
     if(a==="more")return renderFeed(true);
+    if(a==="follow"){if(!auth.user){goTab("profile");return;}await authFetch(`/api/users/${encodeURIComponent(btn.dataset.userName)}/follow`,{method:"POST"});await renderUserProfile();return;}
     if(a==="post")return submitPost();
     if(a==="auth"){
       const body={username:$("#auUser").value.trim(),password:$("#auPass").value};
       if(authMode==="register")body.displayName=$("#auName").value.trim();
-      try{setAuth(await authFetch(authMode==="login"?"/api/auth/login":"/api/auth/register",{method:"POST",body}));renderCommunity();}
+      try{setAuth(await authFetch(authMode==="login"?"/api/auth/login":"/api/auth/register",{method:"POST",body}));render();}
       catch(err){$("#auErr").textContent=err.message;}
       return;
     }
-    if(a==="tglogin"){const ok=await tryTelegramLogin();if(ok)renderCommunity();else toast("Не удалось войти через Telegram.");return;}
-    if(a==="logout"){try{await authFetch("/api/auth/logout",{method:"POST"});}catch{}clearAuth();renderCommunity();return;}
+    if(a==="predsave"){
+      if(!auth.user){goTab("profile");return;}
+      await authFetch("/api/predictions",{method:"POST",body:{p1:$("#pr1").value,p2:$("#pr2").value,p3:$("#pr3").value}});
+      $("#prMsg").textContent="Прогноз сохранён. Удачи!";toast("Прогноз сохранён");return;
+    }
+    if(a==="tglogin"){const ok=await tryTelegramLogin();if(ok)render();else toast("Не удалось войти через Telegram.");return;}
+    if(a==="logout"){try{await authFetch("/api/auth/logout",{method:"POST"});}catch{}clearAuth();render();return;}
     if(a==="saveProfile"){
       const r=await authFetch("/api/me",{method:"PATCH",body:{displayName:$("#pfName").value,bio:$("#pfBio").value,favTeam:$("#pfTeam").value}});
       auth.user=r.user;$("#pfMsg").textContent="Сохранено.";return;
     }
-    if(a==="delacc"){if(!sure("Точно удалить?"))return;await authFetch("/api/me",{method:"DELETE"});clearAuth();toast("Аккаунт удалён.");renderCommunity();return;}
+    if(a==="delacc"){if(!sure("Точно удалить?"))return;await authFetch("/api/me",{method:"DELETE"});clearAuth();toast("Аккаунт удалён.");render();return;}
     if(a==="repdel"||a==="repkeep"){await authFetch(`/api/admin/reports/${btn.dataset.rid}/resolve`,{method:"POST",body:{deletePost:a==="repdel"}});renderProfile();return;}
-    if(!auth.user&&["like","report","comments"].includes(a)&&a!=="comments"){commTab="me";renderCommunity();return;}
+    if(!auth.user&&["like","report","comments"].includes(a)&&a!=="comments"){goTab("profile");return;}
     if(a==="like"){const r=await authFetch(`/api/posts/${id}/like`,{method:"POST"});btn.classList.toggle("on",r.liked);btn.textContent="♥ "+r.likes;return;}
     if(a==="report"){await authFetch(`/api/posts/${id}/report`,{method:"POST",body:{reason:"Нарушение правил"}});btn.textContent="✓";toast("Жалоба отправлена модераторам.");return;}
     if(a==="del"){if(!sure("Точно?"))return;await authFetch(`/api/posts/${id}`,{method:"DELETE"});feedPosts=feedPosts.filter(p=>String(p.id)!==id);postEl.remove();return;}
@@ -297,14 +437,87 @@ content.addEventListener("click",async e=>{
       const box=btn.closest(".comments");await authFetch(`/api/comments/${btn.closest(".comment").dataset.cid}`,{method:"DELETE"});await loadComments(id,box);return;
     }
   }catch(err){
-    if(err.status===401){clearAuth();commTab="me";renderCommunity();return;}
+    if(err.status===401){clearAuth();goTab("profile");return;}
     if(a==="csend"){toast(err.message);return;}
     toast(err.message);
   }
 });
+// ---------- Home & Profile screens ----------
+const ICON={
+  schedule:'<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M8 3v4M16 3v4M3.5 10h17"/>',
+  tracks:'<path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
+  news:'<rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 9h8M8 12.5h8M8 16h5"/>',
+  live:'<path d="M6 21V4M6 4h12l-2.5 4 2.5 4H6"/>'
+};
+const tile=(go,label)=>`<button class="tile" data-go="${go}"><svg viewBox="0 0 24 24" aria-hidden="true">${ICON[go]}</svg>${label}</button>`;
+const SESSION_RU={"Practice 1":"Практика 1","Practice 2":"Практика 2","Practice 3":"Практика 3","Qualifying":"Квалификация","Sprint Qualifying":"Спринт-квалификация","Sprint Shootout":"Спринт-квалификация","Sprint":"Спринт","Race":"Гонка"};
+function nextEvent(d){
+  const now=Date.now();let best=null;
+  for(const r of d.races){
+    const short=String(r.name||"").replace(/\s*Grand Prix$/i,"");
+    const evs=(r.sessions||[]).map(s=>({race:r,short,name:SESSION_RU[s.name]||s.name,time:new Date(s.dateStart).getTime()}));
+    if(!(r.sessions||[]).some(s=>s.name==="Race"))evs.push({race:r,short,name:"Гонка",time:new Date(r.date+"T"+(r.time||"00:00:00Z")).getTime()});
+    for(const e of evs){if(e.time>now&&(!best||e.time<best.time))best=e;}
+  }
+  return best;
+}
+const cdParts=ms=>{const s=Math.max(0,Math.floor(ms/1000));return [Math.floor(s/86400),Math.floor(s%86400/3600),Math.floor(s%3600/60),s%60].map(n=>String(n).padStart(2,"0"));};
+async function communityPreview(){
+  const st=await api("/api/community/status",60000);
+  if(!(st.enabled&&st.ready))return null;
+  return (await authFetch("/api/posts")).posts.slice(0,3);
+}
+async function renderHome(){
+  content.innerHTML=title("Главная","Следующая сессия, новости и лидеры")+`<div class="loading">Загружаем…</div>`;
+  const [sch,news,stand,posts]=await Promise.allSettled([api("/api/schedule",3600000),api("/api/news",600000),api("/api/standings",1800000),communityPreview()]);
+  let html="";
+  const ev=sch.status==="fulfilled"&&sch.value.races?nextEvent(sch.value):null;
+  if(ev){
+    const p=cdParts(ev.time-Date.now());
+    html+=`<section class="card race next"><div class="race-top"><span class="round">Следующая сессия · раунд ${ev.race.round}</span></div><div class="race-title">${esc(ev.short)}</div><div class="race-name">${esc(ev.name)} · ${date(new Date(ev.time).toISOString())}</div><div class="cd" id="cd"><div><b>${p[0]}</b><span>дн</span></div><div><b>${p[1]}</b><span>ч</span></div><div><b>${p[2]}</b><span>мин</span></div><div><b>${p[3]}</b><span>сек</span></div></div><div class="home-actions"><button class="year" data-go="schedule">Расписание</button><button class="year" data-go="live">Live</button><button class="year" data-predict>Прогноз</button></div>${watchLink}</section>`;
+    homeTimer=setInterval(()=>{const el=$("#cd");if(!el){clearInterval(homeTimer);return;}const q=cdParts(ev.time-Date.now());[...el.querySelectorAll("b")].forEach((b,i)=>{b.textContent=q[i];});},1000);
+  }else if(sch.status==="fulfilled"){
+    html+=`<section class="card pad"><b>Сезон завершён</b><p class="small">Следующих сессий в календаре нет.</p></section>`;
+  }
+  html+=`<div class="tiles">${tile("schedule","Расписание")}${tile("tracks","Трассы")}${tile("news","Новости")}</div>`;
+  if(news.status==="fulfilled"&&news.value.items.length){
+    html+=card("Последние новости",news.value.items.slice(0,3).map(x=>`<a class="news-row" href="${esc(x.link)}" target="_blank" rel="noopener"><b>${esc(x.title)}</b><span class="small">${esc(x.source)} · ${ago(x.date)}</span></a>`).join("")+`<div class="pad"><button class="year" data-go="news">Все новости</button></div>`);
+  }
+  if(stand.status==="fulfilled"&&stand.value.drivers.length){
+    html+=card("Лидеры чемпионата",stand.value.drivers.slice(0,3).map(x=>`<div class="item tc has-av" style="--tc:${teamColor(x.team)}"><span class="rank">${x.position}</span>${avatar(x.photo,x.name)}<div><div class="item-title">${esc(x.name)}</div><div class="item-sub">${esc(x.team)}</div></div><span class="points">${x.points}</span></div>`).join("")+`<div class="pad"><button class="year" data-tab-go="standings">Полный зачёт</button></div>`);
+  }
+  if(posts.status==="fulfilled"&&posts.value&&posts.value.length){
+    html+=card("Сообщество",posts.value.map(p=>`<div class="news-row"><div class="post-head">${uav(p.displayName,p.favTeam)}<div class="post-who"><b>${esc(p.displayName)}</b><span class="small">${ago(p.createdAt)} · ♥ ${p.likes}</span></div></div><div class="post-text">${esc(p.text.slice(0,140))}</div></div>`).join("")+`<div class="pad"><button class="year" data-tab-go="community">Открыть ленту</button></div>`);
+  }
+  content.innerHTML=title("Главная","Следующая сессия, новости и лидеры")+html;
+}
+function doAction(what){
+  if(what==="team")return openTeams();
+  if(what==="theme")return $("#theme").click();
+  if(what==="install"){const b=$("#install");if(b.hidden)toast("Приложение уже установлено или установка недоступна.");else b.click();}
+}
+async function renderProfileTab(){
+  const menu=`<section class="card menu"><button class="menu-row" data-go="schedule"><span>Расписание сезона</span><span>›</span></button><button class="menu-row" data-go="tracks"><span>Трассы</span><span>›</span></button><button class="menu-row" data-go="news"><span>Новости, интервью, хайлайты</span><span>›</span></button><button class="menu-row" data-do="team"><span>Цвета команды</span><span>›</span></button><button class="menu-row" data-do="theme"><span>Светлая / тёмная тема</span><span>›</span></button><button class="menu-row" data-do="install"><span>Установить приложение</span><span>›</span></button></section>`;
+  content.innerHTML=title("Профиль","Аккаунт, разделы и настройки")+menu+`<div id="commBody"><div class="loading">Загружаем аккаунт…</div></div>`;
+  let st={enabled:false,ready:false};try{st=await api("/api/community/status");}catch{}
+  if(!(st.enabled&&st.ready)){host().innerHTML=`<section class="card pad"><b>Аккаунты пока недоступны</b><p class="small">Нужна база данных на сервере (${st.enabled?"она ещё подключается":"не подключена"}).</p></section>`;return;}
+  await loadMe();if(!auth.user&&!tgTried){tgTried=true;await tryTelegramLogin();}
+  return renderProfile();
+}
+const SUB=["schedule","tracks","news"];
+let backTo="home", homeTimer=null;
+const backbar=document.createElement("div");backbar.className="backbar";backbar.hidden=true;backbar.innerHTML='<button class="back">← Назад</button>';
+content.parentNode.insertBefore(backbar,content);
+function goTab(name){if(SUB.includes(name)&&!SUB.includes(tab))backTo=tab;tab=name;render();window.scrollTo({top:0,behavior:"smooth"});}
+backbar.addEventListener("click",()=>goTab(backTo));
 async function render(){
+  if(homeTimer){clearInterval(homeTimer);homeTimer=null;}
   if(chatES&&tab!=="community"){chatES.close();chatES=null;}
-  document.querySelectorAll("[data-tab]").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));
+  backbar.hidden=!SUB.includes(tab);
+  const navTab=SUB.includes(tab)?backTo:tab;
+  document.querySelectorAll("[data-tab]").forEach(b=>b.classList.toggle("active",b.dataset.tab===navTab));
+  if(tab==="home")return renderHome();
+  if(tab==="profile")return renderProfileTab();
   if(tab==="schedule")return renderSchedule();
   if(tab==="standings")return renderStandings();
   if(tab==="live")return renderLive();

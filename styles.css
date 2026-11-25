@@ -98,3 +98,59 @@ h2{font-size:17px;font-weight:900;text-transform:uppercase;letter-spacing:-.02em
 .year.more{display:block;margin:14px auto}.year.danger{color:#e0414b;border-color:#e0414b}
 #toast{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom));transform:translate(-50%,20px);background:#15151e;color:#fff;padding:10px 18px;border-radius:999px;font:600 14px "Titillium Web",sans-serif;opacity:0;pointer-events:none;transition:.25s;z-index:30;max-width:90%;text-align:center}
 #toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* home & profile */
+.backbar{padding:0 0 2px}.back{background:none;border:0;color:var(--red);font:700 16px "Titillium Web",sans-serif;padding:8px 0}
+.cd{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:18px 0 6px}
+.cd div{background:rgba(255,255,255,.12);border-radius:14px;padding:10px 0 8px;text-align:center}
+.cd b{display:block;font:700 26px Unbounded,"Titillium Web",sans-serif;letter-spacing:-.03em}
+.cd span{font-size:12px;color:rgba(255,255,255,.7);text-transform:uppercase;letter-spacing:.06em}
+.home-actions{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+.race.next .year{color:#fff;border-color:#fff}
+.race.next .watch{display:inline-block}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:14px 0}
+.tile{background:var(--card);border:0;border-radius:18px;padding:16px 6px 12px;color:var(--ink);font:700 14px "Titillium Web",sans-serif;display:grid;gap:8px;justify-items:center}
+.tile svg{width:28px;height:28px;fill:none;stroke:var(--red);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.news-row{display:grid;gap:4px;padding:12px 18px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none}
+.news-row b{font-size:17px;line-height:1.2}
+.pad{padding:14px 18px}
+.menu{padding:4px 0}.menu-row{display:flex;justify-content:space-between;width:100%;background:none;border:0;border-bottom:1px solid var(--line);padding:16px 18px;color:var(--ink);font:600 17px "Titillium Web",sans-serif;text-align:left}
+.menu-row:last-child{border-bottom:0}.menu-row span:last-child{color:var(--muted)}
+.pred-title{font-size:24px;margin:4px 0 8px}.item.me{background:var(--soft)}
+
+/* compare */
+.cmp-head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;margin-bottom:12px}
+.cmp-who{display:grid;justify-items:center;text-align:center;gap:2px;border-bottom:4px solid var(--tc)}
+.cmp-who b{font-size:16px;line-height:1.15}.vs{font:900 14px Unbounded,sans-serif;color:var(--muted)}
+.cmp-row{display:grid;grid-template-columns:56px 1fr 56px;align-items:center;gap:4px;padding:10px 0;border-bottom:1px solid var(--line)}
+.cmp-row b{font:700 20px "Titillium Web",sans-serif;color:var(--muted)}.cmp-row b:last-of-type{text-align:right}.cmp-row b.win{color:var(--ink)}
+.cmp-label{text-align:center;color:var(--muted);font-size:14px;text-transform:uppercase;letter-spacing:.04em}
+.cmp-bars{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-top:4px}
+.half{display:flex;height:6px;background:var(--line);border-radius:3px;overflow:hidden}.half.l{justify-content:flex-end}.half i{display:block;height:100%}
+.chart{width:100%;height:auto;color:var(--ink)}.legend{display:flex;gap:16px;margin-top:8px;font-weight:700}.legend i{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+
+/* profiles: levels & achievements */
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.post-who[data-user]{cursor:pointer}
+.stats3{display:grid;grid-template-columns:repeat(3,1fr);text-align:center;margin:10px 0}
+.stats3 b{display:block;font:700 22px "Titillium Web",sans-serif}.stats3 span{font-size:13px;color:var(--muted)}
+.level{margin:6px 0 12px}.level-top{display:flex;justify-content:space-between;align-items:baseline}
+.xpbar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:6px}.xpbar i{display:block;height:100%;background:var(--red);border-radius:4px}
+.ach-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 14px 16px}
+.ach{display:grid;gap:3px;padding:12px;border:1px solid var(--line);border-radius:14px;opacity:.45;filter:grayscale(1)}
+.ach.on{opacity:1;filter:none;border-color:var(--red)}.ach-ic{font-size:26px}.ach b{font-size:15px;line-height:1.15}
+
+/* timing tower */
+.tm-row{display:grid;grid-template-columns:24px minmax(0,1fr) 62px 62px 62px 46px;gap:4px;align-items:center;padding:9px 12px 9px 10px;border-bottom:1px solid var(--line);font-size:13px}
+.tm-row.tc{border-left:4px solid var(--tc);padding-left:6px}
+.tm-head{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:700;padding-top:4px;padding-bottom:6px}
+.tm-mode{background:none;border:0;color:var(--red);font:700 11px "Titillium Web",sans-serif;text-transform:uppercase;padding:0;text-align:left}
+.tm-row .rank{font-size:15px;text-align:center}
+.tm-drv{display:grid;line-height:1.1;min-width:0}.tm-drv b{font-size:16px}.tm-drv small{color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tm-gap,.tm-t{font-variant-numeric:tabular-nums;font-weight:600}
+.tm-t.sb{color:#a020f0;font-weight:700}.tm-t.pb{color:#1fa34a;font-weight:700}
+.tm-tyre{display:grid;justify-items:center;gap:1px}.tm-tyre small{font-size:10px;color:var(--muted)}
+.tyre{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;border:3px solid var(--tc);font:800 10px "Titillium Web",sans-serif;font-style:normal;color:var(--ink)}.tyre.none{border-color:var(--line);color:var(--muted)}
+.tm-legend{padding:10px 14px;font-size:12px;color:var(--muted)}.tm-legend .sb{color:#a020f0}.tm-legend .pb{color:#1fa34a;margin-left:10px}
+.strat{display:grid;gap:8px}.strat-row{display:grid;grid-template-columns:42px 1fr;gap:8px;align-items:center}.strat-row b{font-size:14px}
+.strat-bar{display:flex;gap:2px;height:20px}.strat-bar i{display:grid;place-items:center;font:800 10px "Titillium Web",sans-serif;font-style:normal;color:#111;border-radius:3px;min-width:6px}
