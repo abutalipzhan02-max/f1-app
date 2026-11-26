@@ -163,13 +163,110 @@ async function loadSession(key){
     const teams=[...new Set(timing.data.rows.map(r=>r.team).filter(Boolean))];
     const w=d.weather;
     target.innerHTML=`<section class="card pad"><div class="filters"><select id="tmTeam" class="select"><option value="">Все команды</option>${teams.map(t=>`<option>${esc(t)}</option>`).join("")}</select><select id="tmSort" class="select"><option value="pos">По позиции</option><option value="best">По лучшему кругу</option><option value="last">По последнему кругу</option></select></div><input id="tmQ" class="field" placeholder="Поиск пилота (код или имя)" style="margin-top:10px"></section>`
-      +`<div id="tmBody"></div><div id="tmStrategy"></div>`
+      +`<div id="tmBody"></div><div id="tmStrategy"></div><div id="replay"></div><div id="telemetry"></div>`
       +(w?`<div class="grid2"><div class="stat"><strong>${w.air_temperature??"—"}°</strong><span>Температура воздуха</span></div><div class="stat"><strong>${w.track_temperature??"—"}°</strong><span>Температура трассы</span></div><div class="stat"><strong>${w.humidity??"—"}%</strong><span>Влажность</span></div><div class="stat"><strong>${w.rainfall?"Да":"Нет"}</strong><span>Дождь</span></div></div>`:"")
       +card("Race Control",d.raceControl.length?d.raceControl.map(x=>`<div class="session"><b>${esc(x.category||"Сообщение")} · ${esc(x.flag||"")}</b><span class="small">${esc(x.message||"")}</span></div>`).join(""):"<div class='pad muted'>Сообщения Race Control не найдены.</div>")
       +`<p class="source">Это архивная сессия, а не прямой эфир: данные OpenF1 доступны после завершения сессии.${timing.data.partial?" Часть наборов данных не загрузилась, таблица может быть неполной.":""}</p>`;
     drawTiming();
+    setupReplay(d,key);
+    setupTelemetry(d,key);
   }catch(e){target.innerHTML=errorBox(e);}
 }
+// ---------- Telemetry comparison ----------
+let telCtx={key:"",d:null};
+function setupTelemetry(d,key){
+  const el=$("#telemetry");if(!el)return;
+  telCtx={key,d};
+  const drivers=d.drivers.filter(x=>d.laps.some(l=>l.driver_number===x.driver_number&&l.lap_duration>0));
+  const total=Math.max(0,...d.laps.map(l=>l.lap_number||0));
+  if(drivers.length<2||!total){el.innerHTML="";return;}
+  const opt=(sel)=>drivers.map((x,i)=>`<option value="${x.driver_number}"${i===sel?" selected":""}>${esc(x.name_acronym||x.driver_number)} · ${esc(x.full_name||"")}</option>`).join("");
+  el.innerHTML=card("Телеметрия: сравнение пилотов",`<div class="pad"><div class="form"><select id="telA" class="select">${opt(0)}</select><select id="telB" class="select">${opt(1)}</select><select id="telLap" class="select"><option value="">Лучшие круги</option>${[...Array(total)].map((_,i)=>`<option value="${i+1}">Круг ${i+1}</option>`).join("")}</select><button class="year" data-act="telshow">Показать</button></div><div id="telOut"></div><p class="small">Скорость, газ, тормоз, передача и обороты по дистанции круга. Данные OpenF1 по архивной сессии.</p></div>`);
+}
+function plotLines(series,{ymin=0,ymax,unit=""}){
+  const W=340,H=130,L=36,R=8,T=8,B=16;
+  const x=f=>L+f*(W-L-R), y=v=>T+(1-(v-ymin)/(ymax-ymin||1))*(H-T-B);
+  const grid=[0,.5,1].map(f=>{const v=ymin+(ymax-ymin)*f;return `<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="currentColor" stroke-opacity=".12"/><text x="${L-4}" y="${y(v)+4}" text-anchor="end" font-size="10" fill="currentColor" fill-opacity=".6">${Math.round(v)}${unit}</text>`;}).join("");
+  const paths=series.map(s=>`<path d="${s.pts.map((p,i)=>`${i?"L":"M"}${x(p[0]).toFixed(1)} ${y(p[1]).toFixed(1)}`).join("")}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round"/>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="chart tel" role="img">${grid}${paths}</svg>`;
+}
+async function showTelemetry(){
+  const out=$("#telOut");if(!out)return;
+  const a=$("#telA").value,b=$("#telB").value,lap=$("#telLap").value;
+  if(a===b){out.innerHTML='<div class="empty">Выберите двух разных пилотов.</div>';return;}
+  out.innerHTML='<div class="loading">Загружаем телеметрию…</div>';
+  try{
+    const d=await api(`/api/telemetry/${telCtx.key}?a=${a}&b=${b}${lap?`&lap=${lap}`:""}`,3600000);
+    const info=n=>telCtx.d.drivers.find(x=>x.driver_number===n)||{};
+    const [A,B]=d.drivers, ia=info(A.number), ib=info(B.number);
+    const ca=safeColor(ia.team_colour?"#"+ia.team_colour:"#e10600"); let cb=safeColor(ib.team_colour?"#"+ib.team_colour:"#3671C6"); if(cb===ca)cb="#8a8a96";
+    const ser=(idx)=>[{pts:A.points.map(p=>[p[0],p[idx]]),color:ca},{pts:B.points.map(p=>[p[0],p[idx]]),color:cb}];
+    const maxOf=(idx)=>Math.max(...A.points.map(p=>p[idx]||0),...B.points.map(p=>p[idx]||0),1);
+    const share=(P,f)=>Math.round(P.filter(f).length/P.length*100);
+    const avg=P=>Math.round(P.reduce((t,p)=>t+p[1],0)/P.length);
+    const row=(label,va,vb)=>`<div class="cmp-row"><b>${va}</b><span class="cmp-label">${label}</span><b>${vb}</b></div>`;
+    const sA=A.points,sB=B.points;
+    out.innerHTML=`<div class="legend"><span><i style="background:${ca}"></i>${esc(ia.name_acronym||A.number)} · ${lapFmt(A.lapTime)} (круг ${A.lap})</span><span><i style="background:${cb}"></i>${esc(ib.name_acronym||B.number)} · ${lapFmt(B.lapTime)} (круг ${B.lap})</span></div>`
+      +`<h3 class="tel-h">Скорость, км/ч</h3>${plotLines(ser(1),{ymin:0,ymax:Math.ceil(maxOf(1)/50)*50})}`
+      +`<h3 class="tel-h">Газ, %</h3>${plotLines(ser(2),{ymin:0,ymax:100})}`
+      +`<h3 class="tel-h">Тормоз</h3>${plotLines(ser(3),{ymin:0,ymax:100})}`
+      +`<h3 class="tel-h">Передача</h3>${plotLines(ser(4),{ymin:0,ymax:8})}`
+      +`<h3 class="tel-h">Обороты</h3>${plotLines(ser(5),{ymin:0,ymax:Math.ceil(maxOf(5)/2000)*2000})}`
+      +`<div class="tel-table">${row("Макс. скорость",Math.max(...sA.map(p=>p[1])),Math.max(...sB.map(p=>p[1])))}${row("Средняя скорость",avg(sA),avg(sB))}${row("Полный газ, %",share(sA,p=>p[2]>=99),share(sB,p=>p[2]>=99))}${row("Торможение, %",share(sA,p=>p[3]>0),share(sB,p=>p[3]>0))}</div>`;
+  }catch(e){out.innerHTML=errorBox(e);}
+}
+// ---------- Race replay on the track map ----------
+let replay={key:"",d:null,lap:1,total:0,outline:null,token:0,timer:null};
+function lapEndTime(d,n){
+  let best=Infinity;
+  for(const l of d.laps){if(l.lap_number===n&&l.lap_duration>0&&l.date_start){const t=Date.parse(l.date_start)+l.lap_duration*1000;if(t<best)best=t;}}
+  return best===Infinity?null:best;
+}
+function setupReplay(d,key){
+  const el=$("#replay");if(!el)return;
+  const total=Math.max(0,...d.laps.map(l=>l.lap_number||0));
+  if(!total||!d.laps.some(l=>l.date_start)){el.innerHTML="";return;}
+  replay={key,d,lap:1,total,outline:null,token:0,timer:null};
+  el.innerHTML=`<section class="card pad replay"><h2>Повтор на трассе</h2><p class="small">Положение машин в момент, когда лидер завершил выбранный круг. Данные OpenF1 по архивной сессии.</p><div class="rp-ctrl"><button class="year" data-rp="-1" aria-label="Круг назад">◀</button><input id="rpLap" type="range" min="1" max="${total}" value="1"><button class="year" data-rp="1" aria-label="Круг вперёд">▶</button></div><div class="small" id="rpLabel">Круг 1 / ${total}</div><div id="rpMap" class="rp-map"><span class="small">Загружаем трассу…</span></div><div id="rpOrder" class="rp-order"></div></section>`;
+  updateReplay();
+}
+function setLap(n){
+  replay.lap=Math.min(replay.total,Math.max(1,n));
+  const r=$("#rpLap");if(r)r.value=replay.lap;
+  const l=$("#rpLabel");if(l)l.textContent=`Круг ${replay.lap} / ${replay.total}`;
+  clearTimeout(replay.timer);replay.timer=setTimeout(updateReplay,550);
+}
+async function updateReplay(){
+  const R=replay, token=++R.token;
+  const T=lapEndTime(R.d,R.lap);
+  const drv=new Map(R.d.drivers.map(x=>[x.driver_number,x]));
+  // order at time T from the position feed
+  if(T){
+    const latest=new Map();
+    for(const p of R.d.positions){const t=Date.parse(p.date);if(t<=T){const o=latest.get(p.driver_number);if(!o||t>Date.parse(o.date))latest.set(p.driver_number,p);}}
+    const order=[...latest.values()].sort((x,y)=>x.position-y.position).slice(0,10);
+    const box=$("#rpOrder");
+    if(box)box.innerHTML=order.map(p=>{const dr=drv.get(p.driver_number)||{};return `<span class="rp-chip" style="--tc:${dr.team_colour?"#"+dr.team_colour:"#3a3a46"}"><b>${p.position}</b>${esc(dr.name_acronym||p.driver_number)}</span>`;}).join("");
+  }
+  try{
+    if(!R.outline)R.outline=(await api(`/api/outline/${R.key}`,86400000)).points;
+  }catch(e){const m=$("#rpMap");if(m)m.innerHTML='<span class="small">Контур трассы недоступен для этой сессии.</span>';return;}
+  let cars=[];
+  if(T){try{cars=(await api(`/api/locations/${R.key}?at=${encodeURIComponent(new Date(T).toISOString())}`,3600000)).cars;}catch{}}
+  if(token!==R.token)return;
+  drawReplay(cars,drv);
+}
+function drawReplay(cars,drv){
+  const m=$("#rpMap");if(!m)return;
+  const pts=replay.outline, xs=pts.map(p=>p[0]), ys=pts.map(p=>-p[1]);
+  const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+  const w=maxX-minX||1,h=maxY-minY||1,pad=Math.max(w,h)*.08,r=Math.max(w,h)*.022;
+  const path="M"+pts.map((p,i)=>`${(xs[i]-minX).toFixed(0)} ${(ys[i]-minY).toFixed(0)}`).join("L")+"Z";
+  const dots=cars.map(c=>{const dr=drv.get(c.driver_number)||{};const col=dr.team_colour?"#"+dr.team_colour:"#999";const cx=(c.x-minX).toFixed(0),cy=(-c.y-minY).toFixed(0);
+    return `<g><circle cx="${cx}" cy="${cy}" r="${r}" fill="${col}" stroke="var(--card)" stroke-width="${r*.25}"/><text x="${cx}" y="${(-c.y-minY-r*1.35).toFixed(0)}" text-anchor="middle" font-size="${r*1.5}" font-weight="700" fill="var(--ink)">${esc(dr.name_acronym||c.driver_number)}</text></g>`;}).join("");
+  m.innerHTML=`<svg viewBox="${-pad} ${-pad} ${w+2*pad} ${h+2*pad}" class="rp-svg" role="img" aria-label="Положение машин на трассе"><path d="${path}" fill="none" stroke="currentColor" stroke-opacity=".25" stroke-width="10" stroke-linejoin="round" vector-effect="non-scaling-stroke"/><path d="${path}" fill="none" stroke="var(--red)" stroke-width="3" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>${dots}</svg>${cars.length?"":'<div class="small">Нет данных о положении машин для этого круга.</div>'}`;
+}
+content.addEventListener("input",e=>{if(e.target.id==="rpLap")setLap(Number(e.target.value));});
 let trackChain=Promise.resolve();
 async function fillTrack(el){
   try{
@@ -390,6 +487,7 @@ content.addEventListener("input",e=>{if(e.target.id==="tmQ"){timing.q=e.target.v
 content.addEventListener("click",async e=>{
   if(e.target.closest("[data-tmmode]")){timing.mode=timing.mode==="gap"?"int":"gap";drawTiming();return;}
   const pr=e.target.closest("[data-predict]");if(pr){commTab="predict";goTab("community");return;}
+  const rp=e.target.closest("[data-rp]");if(rp){setLap(replay.lap+Number(rp.dataset.rp));return;}
   const tg=e.target.closest("[data-tab-go]");if(tg){goTab(tg.dataset.tabGo);return;}
   const g=e.target.closest("[data-go]");if(g){goTab(g.dataset.go);return;}
   const dd=e.target.closest("[data-do]");if(dd){doAction(dd.dataset.do);return;}
@@ -400,6 +498,7 @@ content.addEventListener("click",async e=>{
   const a=btn.dataset.act, postEl=btn.closest(".post"), id=postEl?.dataset.post;
   const sure=(label,ms=3000)=>{if(btn.dataset.sure==="1")return true;const old=btn.textContent;btn.dataset.sure="1";btn.textContent=label;setTimeout(()=>{btn.dataset.sure="";btn.textContent=old;},ms);return false;};
   try{
+    if(a==="telshow")return showTelemetry();
     if(a==="more")return renderFeed(true);
     if(a==="follow"){if(!auth.user){goTab("profile");return;}await authFetch(`/api/users/${encodeURIComponent(btn.dataset.userName)}/follow`,{method:"POST"});await renderUserProfile();return;}
     if(a==="post")return submitPost();

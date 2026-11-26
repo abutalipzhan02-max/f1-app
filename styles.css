@@ -154,3 +154,10 @@ h2{font-size:17px;font-weight:900;text-transform:uppercase;letter-spacing:-.02em
 .tm-legend{padding:10px 14px;font-size:12px;color:var(--muted)}.tm-legend .sb{color:#a020f0}.tm-legend .pb{color:#1fa34a;margin-left:10px}
 .strat{display:grid;gap:8px}.strat-row{display:grid;grid-template-columns:42px 1fr;gap:8px;align-items:center}.strat-row b{font-size:14px}
 .strat-bar{display:flex;gap:2px;height:20px}.strat-bar i{display:grid;place-items:center;font:800 10px "Titillium Web",sans-serif;font-style:normal;color:#111;border-radius:3px;min-width:6px}
+
+/* race replay */
+.rp-ctrl{display:flex;gap:10px;align-items:center;margin:10px 0 4px}.rp-ctrl input{flex:1;accent-color:var(--red)}.rp-ctrl .year{padding:6px 14px}
+.rp-map{margin-top:8px}.rp-svg{width:100%;height:300px;color:var(--ink);display:block}
+.rp-order{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.rp-chip{display:inline-flex;gap:6px;align-items:center;padding:4px 10px;border-radius:999px;border:2px solid var(--tc);font:700 13px "Titillium Web",sans-serif}.rp-chip b{opacity:.6}
+.tel-h{font:700 15px "Titillium Web",sans-serif;text-transform:uppercase;letter-spacing:.04em;margin:16px 0 2px}.chart.tel{height:auto}.tel-table{margin-top:14px}

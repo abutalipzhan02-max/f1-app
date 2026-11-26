@@ -359,6 +359,81 @@ app.get("/api/track/:key", async (req, res) => {
   }
 });
 
+// ---------- Race replay: track outline + car positions (OpenF1 location, historical) ----------
+const isoNoZ = ms => new Date(ms).toISOString().replace("Z", "");
+app.get("/api/outline/:session", async (req, res) => {
+  const key = req.params.session;
+  if (!/^\d+$/.test(key)) return res.status(400).json({ error: "Некорректный session key." });
+  try {
+    const data = await cached(`outline-${key}`, 7 * DAY, async () => {
+      const laps = await openf1("laps", { session_key: key });
+      const valid = laps.filter(l => l.lap_duration > 50 && l.lap_duration < 200 && l.date_start && !l.is_pit_out_lap);
+      if (!valid.length) throw new Error("Нет подходящего круга для контура трассы.");
+      const best = valid.reduce((m, l) => l.lap_duration < m.lap_duration ? l : m);
+      const start = Date.parse(best.date_start), end = start + best.lap_duration * 1000;
+      const loc = await getJson(`${OPENF1}/location?session_key=${key}&driver_number=${best.driver_number}&date>=${isoNoZ(start)}&date<${isoNoZ(end)}`);
+      const pts = loc.filter(p => p.x !== undefined && !(p.x === 0 && p.y === 0));
+      if (pts.length < 20) throw new Error("Недостаточно данных о положении машины.");
+      const step = Math.max(1, Math.floor(pts.length / 260));
+      return { points: pts.filter((_, i) => i % step === 0).map(p => [p.x, p.y]) };
+    });
+    res.json(data);
+  } catch (e) {
+    res.status(404).json({ error: "Контур трассы недоступен для этой сессии.", detail: e.message });
+  }
+});
+app.get("/api/locations/:session", async (req, res) => {
+  const key = req.params.session, at = Date.parse(String(req.query.at || ""));
+  if (!/^\d+$/.test(key) || isNaN(at)) return res.status(400).json({ error: "Некорректный запрос." });
+  try {
+    const cars = await cached(`loc-${key}-${Math.round(at / 2000)}`, 3600e3, async () => {
+      const loc = await getJson(`${OPENF1}/location?session_key=${key}&date>=${isoNoZ(at)}&date<${isoNoZ(at + 2500)}`);
+      const latest = new Map();
+      for (const p of loc) { const o = latest.get(p.driver_number); if (!o || p.date > o.date) latest.set(p.driver_number, p); }
+      return [...latest.values()].filter(p => !(p.x === 0 && p.y === 0)).map(p => ({ driver_number: p.driver_number, x: p.x, y: p.y }));
+    });
+    res.json({ cars });
+  } catch (e) {
+    res.status(502).json({ error: "Положение машин недоступно.", detail: e.message });
+  }
+});
+
+// ---------- Telemetry comparison: two drivers on one lap (OpenF1 car_data, historical) ----------
+app.get("/api/telemetry/:session", async (req, res) => {
+  const key = req.params.session, a = String(req.query.a || ""), b = String(req.query.b || ""), lap = String(req.query.lap || "");
+  if (![key, a, b].every(v => /^\d+$/.test(v)) || a === b || (lap && !/^\d+$/.test(lap))) return res.status(400).json({ error: "Выберите двух разных пилотов." });
+  try {
+    const data = await cached(`tel-${key}-${a}-${b}-${lap || "best"}`, 3600e3, async () => {
+      const laps = await cached(`laps-${key}`, 600e3, () => openf1("laps", { session_key: key }));
+      const drivers = [];
+      for (const num of [a, b]) {
+        const mine = laps.filter(l => String(l.driver_number) === num && l.date_start && l.lap_duration > 0);
+        const rec = lap ? mine.find(l => l.lap_number === Number(lap))
+          : mine.filter(l => !l.is_pit_out_lap).reduce((m, l) => (!m || l.lap_duration < m.lap_duration) ? l : m, null);
+        if (!rec) throw new Error(`Нет данных об этом круге у пилота №${num}.`);
+        const start = Date.parse(rec.date_start), end = start + rec.lap_duration * 1000;
+        const car = await getJson(`${OPENF1}/car_data?session_key=${key}&driver_number=${num}&date>=${isoNoZ(start)}&date<${isoNoZ(end)}`);
+        if (!Array.isArray(car) || car.length < 20) throw new Error(`Нет телеметрии пилота №${num} за этот круг.`);
+        car.sort((x, y) => Date.parse(x.date) - Date.parse(y.date));
+        const dist = [0];
+        for (let i = 1; i < car.length; i++) {
+          const dt = Math.min(1, (Date.parse(car[i].date) - Date.parse(car[i - 1].date)) / 1000);
+          dist.push(dist[i - 1] + (car[i].speed / 3.6) * dt);
+        }
+        const total = dist[dist.length - 1];
+        if (!(total > 500)) throw new Error("Слишком мало данных скорости для расчёта дистанции.");
+        const step = Math.max(1, Math.floor(car.length / 300));
+        drivers.push({ number: Number(num), lap: rec.lap_number, lapTime: rec.lap_duration,
+          points: car.map((p, i) => [Math.round(dist[i] / total * 10000) / 10000, p.speed, p.throttle, p.brake, p.n_gear, p.rpm]).filter((_, i) => i % step === 0) });
+      }
+      return { drivers };
+    });
+    res.json(data);
+  } catch (e) {
+    res.status(404).json({ error: "Телеметрия для этого выбора недоступна.", detail: e.message });
+  }
+});
+
 // ---------- Driver comparison (analytics) ----------
 app.get("/api/compare", async (req, res) => {
   const season = /^\d{4}$/.test(req.query.season || "") ? req.query.season : String(YEAR);
