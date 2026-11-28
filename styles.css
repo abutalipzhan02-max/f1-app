@@ -161,3 +161,35 @@ h2{font-size:17px;font-weight:900;text-transform:uppercase;letter-spacing:-.02em
 .rp-order{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .rp-chip{display:inline-flex;gap:6px;align-items:center;padding:4px 10px;border-radius:999px;border:2px solid var(--tc);font:700 13px "Titillium Web",sans-serif}.rp-chip b{opacity:.6}
 .tel-h{font:700 15px "Titillium Web",sans-serif;text-transform:uppercase;letter-spacing:.04em;margin:16px 0 2px}.chart.tel{height:auto}.tel-table{margin-top:14px}
+
+/* ===== APEX dark theme (default; ◐ switches to the light F1-app style) ===== */
+.wordmark{font:900 26px Unbounded,"Titillium Web",sans-serif;font-style:italic;letter-spacing:-.05em;color:var(--ink);line-height:1}
+.wordmark i{color:var(--red);font-style:italic;letter-spacing:-.12em;margin-left:3px}
+:root:not(.light){--bg:#090909;--card:#131316;--ink:#f4f4f6;--muted:#8d8d98;--edge:#2a2a30;--line:#222228;--red:#e10600;--glow1:rgba(225,6,0,.24);--glow2:rgba(225,6,0,0);--soft:rgba(225,6,0,.16)}
+:root:not(.light) body{background:radial-gradient(70% 24% at 100% 0,var(--glow1),transparent 70%),repeating-linear-gradient(45deg,rgba(255,255,255,.018) 0 2px,transparent 2px 6px),var(--bg);background-attachment:fixed}
+:root:not(.light) h1{font-style:italic;font-weight:900;letter-spacing:-.04em;font-size:34px}
+:root:not(.light) h2{font-style:italic;letter-spacing:-.02em}
+:root:not(.light) .card{border:1px solid var(--edge);border-radius:14px}
+:root:not(.light) .tabs{border:0;gap:8px;overflow-x:auto;margin:14px 0}
+:root:not(.light) .tabs button{flex:0 0 auto;margin:0;padding:9px 16px;border:1px solid var(--edge);border-radius:8px;background:var(--card);color:var(--muted);font:700 13px "Titillium Web",sans-serif;text-transform:uppercase;letter-spacing:.07em}
+:root:not(.light) .tabs button.active{background:var(--red);border-color:var(--red);color:#fff}
+:root:not(.light) .select,:root:not(.light) .year{border:1px solid var(--edge);border-radius:8px;background:var(--card);color:var(--ink);font:700 13px "Titillium Web",sans-serif;text-transform:uppercase;letter-spacing:.05em;padding:10px 16px}
+:root:not(.light) .year[data-act="post"],:root:not(.light) .year[data-act="auth"],:root:not(.light) .year[data-act="predsave"],:root:not(.light) .year[data-act="telshow"],:root:not(.light) .year[data-act="saveProfile"],:root:not(.light) #chatSend{background:var(--red);border-color:var(--red);color:#fff}
+:root:not(.light) .pill{border-radius:4px;text-transform:uppercase;letter-spacing:.05em;font-size:11px}
+:root:not(.light) .nav{left:0;right:0;bottom:0;max-width:none;border-radius:0;border:0;border-top:1px solid var(--edge);background:rgba(9,9,9,.97);backdrop-filter:none;box-shadow:none;padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+:root:not(.light) .nav button.active{background:none;color:var(--red)}
+:root:not(.light) .nav button.active svg{fill:currentColor;fill-opacity:.18}
+:root:not(.light) .race.next{border:1px solid var(--red);background:radial-gradient(110% 80% at 100% 0,rgba(225,6,0,.4),transparent 60%),linear-gradient(160deg,#1b1b1f,#0a0a0b)}
+:root:not(.light) .cd div{background:#0c0c0e;border:1px solid var(--red);border-radius:8px}
+:root:not(.light) .cd b{font-style:italic}
+:root:not(.light) .date-pill{background:#0c0c0e;border:1px solid var(--edge);border-radius:6px}
+:root:not(.light) .tile{background:var(--card);border:1px solid var(--edge);border-radius:12px}
+:root:not(.light) .item.me{background:var(--soft)}
+:root:not(.light) #toast{background:var(--red)}
+
+/* home: weekend schedule */
+.sched-row{display:grid;grid-template-columns:44px 14px 1fr auto;align-items:center;gap:8px;padding:11px 18px;border-bottom:1px solid var(--line)}
+.sched-row .sd{font:700 13px "Titillium Web",sans-serif;color:var(--muted);letter-spacing:.06em}
+.sched-row i{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.sched-row b{font-size:17px}.sched-row time{font:700 17px "Titillium Web",sans-serif}
+.sched-row.now i{background:var(--red);box-shadow:0 0 0 4px var(--soft)}.sched-row.now b,.sched-row.now time{color:var(--red)}

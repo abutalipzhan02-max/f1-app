@@ -162,11 +162,11 @@ async function loadSession(key){
     timing={data:buildTiming(d),team:"",sort:"pos",mode:"gap",q:""};
     const teams=[...new Set(timing.data.rows.map(r=>r.team).filter(Boolean))];
     const w=d.weather;
-    target.innerHTML=`<section class="card pad"><div class="filters"><select id="tmTeam" class="select"><option value="">Все команды</option>${teams.map(t=>`<option>${esc(t)}</option>`).join("")}</select><select id="tmSort" class="select"><option value="pos">По позиции</option><option value="best">По лучшему кругу</option><option value="last">По последнему кругу</option></select></div><input id="tmQ" class="field" placeholder="Поиск пилота (код или имя)" style="margin-top:10px"></section>`
-      +`<div id="tmBody"></div><div id="tmStrategy"></div><div id="replay"></div><div id="telemetry"></div>`
+    target.innerHTML=`<div class="tabs" id="liveTabs"><button data-live="timing" class="active">Тайминг</button><button data-live="track">Трасса</button><button data-live="stats">Статистика</button></div><div data-sec="timing"><section class="card pad"><div class="filters"><select id="tmTeam" class="select"><option value="">Все команды</option>${teams.map(t=>`<option>${esc(t)}</option>`).join("")}</select><select id="tmSort" class="select"><option value="pos">По позиции</option><option value="best">По лучшему кругу</option><option value="last">По последнему кругу</option></select></div><input id="tmQ" class="field" placeholder="Поиск пилота (код или имя)" style="margin-top:10px"></section>`
+      +`<div id="tmBody"></div></div><div data-sec="track" hidden><div id="replay"></div></div><div data-sec="stats" hidden><div id="tmStrategy"></div><div id="telemetry"></div>`
       +(w?`<div class="grid2"><div class="stat"><strong>${w.air_temperature??"—"}°</strong><span>Температура воздуха</span></div><div class="stat"><strong>${w.track_temperature??"—"}°</strong><span>Температура трассы</span></div><div class="stat"><strong>${w.humidity??"—"}%</strong><span>Влажность</span></div><div class="stat"><strong>${w.rainfall?"Да":"Нет"}</strong><span>Дождь</span></div></div>`:"")
       +card("Race Control",d.raceControl.length?d.raceControl.map(x=>`<div class="session"><b>${esc(x.category||"Сообщение")} · ${esc(x.flag||"")}</b><span class="small">${esc(x.message||"")}</span></div>`).join(""):"<div class='pad muted'>Сообщения Race Control не найдены.</div>")
-      +`<p class="source">Это архивная сессия, а не прямой эфир: данные OpenF1 доступны после завершения сессии.${timing.data.partial?" Часть наборов данных не загрузилась, таблица может быть неполной.":""}</p>`;
+      +`</div><p class="source">Это архивная сессия, а не прямой эфир: данные OpenF1 доступны после завершения сессии.${timing.data.partial?" Часть наборов данных не загрузилась, таблица может быть неполной.":""}</p>`;
     drawTiming();
     setupReplay(d,key);
     setupTelemetry(d,key);
@@ -389,7 +389,7 @@ async function tryTelegramLogin(){
   try{setAuth(await authFetch("/api/auth/telegram",{method:"POST",body:{initData:Telegram.WebApp.initData}}));return true;}catch{return false;}
 }
 async function renderCommunity(){
-  const tabs=[["feed","Лента"],["predict","Прогнозы"],["chat","Чат"]].map(([k,l])=>`<button data-comm="${k}" class="${commTab===k?"active":""}">${l}</button>`).join("");
+  const tabs=[["feed","Для вас"],["following","Подписки"],["predict","Прогнозы"],["chat","Чат"]].map(([k,l])=>`<button data-comm="${k}" class="${commTab===k?"active":""}">${l}</button>`).join("");
   content.innerHTML=title("Сообщество","Лента, чат и профили болельщиков")+`<div class="tabs">${tabs}</div><div id="commBody"><div class="loading">Загружаем…</div></div>`;
   if(commTab!=="chat"&&chatES){chatES.close();chatES=null;}
   let st={enabled:false,ready:false};
@@ -397,6 +397,10 @@ async function renderCommunity(){
   if(st.enabled&&st.ready){await loadMe();if(!auth.user&&!tgTried){tgTried=true;await tryTelegramLogin();}}
   if(commTab==="chat")return renderChat();
   if(!st.enabled||!st.ready){host().innerHTML=`<section class="card pad"><b>Лента и профили пока недоступны</b><p class="small">Для них нужна база данных на сервере (${st.enabled?"она ещё подключается, попробуйте через минуту":"не подключена"}). Чат при этом работает.</p><button class="year" data-comm="chat">Открыть чат</button></section>`;return;}
+  if(commTab==="following"){
+    if(!auth.user){host().innerHTML=`<section class="card pad"><b>Войдите, чтобы видеть подписки</b><p class="small">Здесь будут публикации людей, на которых вы подписаны.</p><button class="year" data-comm="me">Войти / регистрация</button></section>`;return;}
+    feedScope="following";
+  }else if(commTab==="feed")feedScope="";
   if(commTab==="predict")return renderPredict();
   if(commTab==="user")return renderUserProfile();
   return renderFeed();
@@ -411,7 +415,7 @@ function drawFeed(){
   el.innerHTML=feedPosts.length?feedPosts.map(postHtml).join("")+(feedMore?`<button class="year more" data-act="more">Показать ещё</button>`:""):`<div class="empty">${feedScope==="following"?"В подписках пока нет публикаций. Откройте профиль автора и нажмите «Подписаться».":"Пока нет публикаций. Станьте первым!"}</div>`;
 }
 async function renderFeed(append){
-  if(!append){host().innerHTML=composerHtml()+`<div class="filters"><select id="feedScope" class="select"><option value="">Все публикации</option><option value="following"${feedScope==="following"?" selected":""}>Мои подписки</option></select><select id="feedTeam" class="select"><option value="">Все команды</option>${teamOptions(feedTeam)}</select></div><div id="feedList"><div class="loading">Загружаем ленту…</div></div>`;feedPosts=[];}
+  if(!append){host().innerHTML=composerHtml()+`<div class="filters"><select id="feedTeam" class="select"><option value="">Все команды</option>${teamOptions(feedTeam)}</select></div><div id="feedList"><div class="loading">Загружаем ленту…</div></div>`;feedPosts=[];}
   try{
     const last=append&&feedPosts.length?feedPosts[feedPosts.length-1].id:"";
     const d=await authFetch(`/api/posts?${feedTeam?`team=${feedTeam}&`:""}${feedScope?`scope=${feedScope}&`:""}${last?`before=${last}`:""}`);
@@ -487,6 +491,8 @@ content.addEventListener("input",e=>{if(e.target.id==="tmQ"){timing.q=e.target.v
 content.addEventListener("click",async e=>{
   if(e.target.closest("[data-tmmode]")){timing.mode=timing.mode==="gap"?"int":"gap";drawTiming();return;}
   const pr=e.target.closest("[data-predict]");if(pr){commTab="predict";goTab("community");return;}
+  const lv=e.target.closest("[data-live]");
+  if(lv){document.querySelectorAll("[data-live]").forEach(b=>b.classList.toggle("active",b===lv));document.querySelectorAll("[data-sec]").forEach(s=>{s.hidden=s.dataset.sec!==lv.dataset.live;});return;}
   const rp=e.target.closest("[data-rp]");if(rp){setLap(replay.lap+Number(rp.dataset.rp));return;}
   const tg=e.target.closest("[data-tab-go]");if(tg){goTab(tg.dataset.tabGo);return;}
   const g=e.target.closest("[data-go]");if(g){goTab(g.dataset.go);return;}
@@ -567,7 +573,7 @@ async function communityPreview(){
   return (await authFetch("/api/posts")).posts.slice(0,3);
 }
 async function renderHome(){
-  content.innerHTML=title("Главная","Следующая сессия, новости и лидеры")+`<div class="loading">Загружаем…</div>`;
+  content.innerHTML=title("Гоночная неделя","Следующая сессия, новости и лидеры")+`<div class="loading">Загружаем…</div>`;
   const [sch,news,stand,posts]=await Promise.allSettled([api("/api/schedule",3600000),api("/api/news",600000),api("/api/standings",1800000),communityPreview()]);
   let html="";
   const ev=sch.status==="fulfilled"&&sch.value.races?nextEvent(sch.value):null;
@@ -577,6 +583,14 @@ async function renderHome(){
     homeTimer=setInterval(()=>{const el=$("#cd");if(!el){clearInterval(homeTimer);return;}const q=cdParts(ev.time-Date.now());[...el.querySelectorAll("b")].forEach((b,i)=>{b.textContent=q[i];});},1000);
   }else if(sch.status==="fulfilled"){
     html+=`<section class="card pad"><b>Сезон завершён</b><p class="small">Следующих сессий в календаре нет.</p></section>`;
+  }
+  if(ev){
+    const r=ev.race, evs=(r.sessions||[]).filter(s=>s.dateStart).map(s=>({name:SESSION_RU[s.name]||s.name,t:Date.parse(s.dateStart)}));
+    if(!(r.sessions||[]).some(s=>s.name==="Race"))evs.push({name:"Гонка",t:Date.parse(r.date+"T"+(r.time||"00:00:00Z"))});
+    evs.sort((x,y)=>x.t-y.t);
+    const day=t=>new Date(t).toLocaleDateString("ru-RU",{weekday:"short"}).replace(".","").toUpperCase();
+    const hm=t=>new Date(t).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"});
+    html+=card("Расписание уикенда",evs.map(x=>`<div class="sched-row${x.t===ev.time?" now":""}"><span class="sd">${day(x.t)}</span><i></i><b>${esc(x.name)}</b><time>${hm(x.t)}</time></div>`).join("")+`<div class="pad"><button class="year" data-go="schedule">Весь календарь</button></div>`);
   }
   html+=`<div class="tiles">${tile("schedule","Расписание")}${tile("tracks","Трассы")}${tile("news","Новости")}</div>`;
   if(news.status==="fulfilled"&&news.value.items.length){
@@ -588,7 +602,7 @@ async function renderHome(){
   if(posts.status==="fulfilled"&&posts.value&&posts.value.length){
     html+=card("Сообщество",posts.value.map(p=>`<div class="news-row"><div class="post-head">${uav(p.displayName,p.favTeam)}<div class="post-who"><b>${esc(p.displayName)}</b><span class="small">${ago(p.createdAt)} · ♥ ${p.likes}</span></div></div><div class="post-text">${esc(p.text.slice(0,140))}</div></div>`).join("")+`<div class="pad"><button class="year" data-tab-go="community">Открыть ленту</button></div>`);
   }
-  content.innerHTML=title("Главная","Следующая сессия, новости и лидеры")+html;
+  content.innerHTML=title("Гоночная неделя","Следующая сессия, новости и лидеры")+html;
 }
 function doAction(what){
   if(what==="team")return openTeams();
@@ -654,7 +668,7 @@ let teamId=(()=>{try{return localStorage.getItem("f1team")||"";}catch{return "";
 function applyTeam(){
   const root=document.documentElement, light=root.classList.contains("light"), t=TEAMS.find(x=>x.id===teamId);
   const keys=["--red","--yellow","--glow1","--glow2","--soft","--on","--bg"];
-  let bg=light?"#f5f4f1":"#15151e";
+  let bg=light?"#f5f4f1":"#090909";
   if(!t){keys.forEach(k=>root.style.removeProperty(k));}
   else{
     let a=t.a;
@@ -683,7 +697,7 @@ function openTeams(){
 }
 $("#team").onclick=openTeams;
 $("#theme").onclick=()=>{const l=document.documentElement.classList.toggle("light");try{localStorage.setItem("f1theme",l?"light":"dark");}catch{}applyTeam();};
-if(window.Telegram?.WebApp){Telegram.WebApp.ready();Telegram.WebApp.expand();try{Telegram.WebApp.setHeaderColor("#15151e");Telegram.WebApp.setBackgroundColor("#15151e");}catch{}}
+if(window.Telegram?.WebApp){Telegram.WebApp.ready();Telegram.WebApp.expand();try{Telegram.WebApp.setHeaderColor("#090909");Telegram.WebApp.setBackgroundColor("#090909");}catch{}}
 // ---------- Install as an app (PWA) ----------
 if("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(()=>{});
 let installEvent=null;
